@@ -61,10 +61,17 @@ weeks that simply predate the Craft mirror (which starts 2026-07-16), which read
 as *"you journaled nothing"* rather than *"we don't know."* Partial weeks are
 unknown too — the week of Jul 13 has 4 of 7 days mirrored and scored 0.
 
-**Don't cry wolf mid-week.** A weekly threshold must not fire on a Tuesday. A
-cumulative metric only goes `○` when the target has become unreachable
-(`value + days_left < threshold`); until then it's `·` on pace. A dashboard that
-says you're failing every Monday is one you stop opening.
+**Rolling 7 days, never a calendar week.** A calendar week resets every Monday,
+so the number is meaningless until Sunday, and it needed a whole pace/days-left
+apparatus just to avoid reading as failure all week. A rolling window always
+means the same thing on any day — and deleting the calendar week deleted that
+code. Where a calendar week still matters (the Sunday text), it starts Monday.
+
+**Sparklines are 0-anchored, so flat means flat.** Each point is the rolling-7
+value sampled that day, so consecutive points share six of seven days and the
+line moves smoothly. The scale runs 0..max rather than min..max: a metric sitting
+steadily at 6/7 *should* look level, not dramatic. Rescaling to the observed
+range would turn noise into a story.
 
 **Look at the glyphs on the real terminal.** `▁▂▃▄▅▆▇█` was verified in Ghostty /
 JetBrains Mono with a *jagged* test row — an ascending staircase hides
@@ -85,7 +92,7 @@ printed rather than buried.
 
 ## Status
 
-- ✅ CLI, renderer, sparklines, config, state merge
+- ✅ CLI, renderer, rolling-7 windows, 14-day sparklines, config, state merge
 - ✅ Local collectors: journal (+ 8-week history), writing
 - ⬜ Strava / Hevy / Oura collectors
 - ⬜ SwiftBar menu bar reader

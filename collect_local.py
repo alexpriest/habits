@@ -132,42 +132,46 @@ def days_since_publish() -> tuple[int | None, str]:
     return (date.today() - newest[0]).days, f'last: "{newest[1]}", {newest[0]:%b %-d}'
 
 
-def this_week(today: date | None = None) -> list[date]:
-    today = today or date.today()
-    start = today - timedelta(days=today.weekday())
-    return [start + timedelta(days=i) for i in range(7) if start + timedelta(days=i) <= today]
+def last_7_days(today: date | None = None) -> list[date]:
+    """A ROLLING window, not a calendar week.
 
-
-def journal_history(weeks: int = 8, today: date | None = None) -> list[int | None]:
-    """Journaled-days per week for the N *completed* weeks before this one.
-
-    Fully reconstructible from the Craft mirror, so the sparkline is real on day
-    one instead of filling in over two months.
-
-    ⚠️ A week with NO note files at all is `None` (unknown), never 0. The Craft
-    mirror only reaches back to 2026-07-16; scoring the empty weeks before it as
-    zero drew five weeks of floor blocks that read as "you journaled nothing"
-    when the truth was "nothing was mirrored yet."
+    A calendar week resets every Monday, so the number is meaningless until
+    Sunday and needs a pace/days-left apparatus to avoid reading as failure all
+    week. Rolling 7 days always means the same thing, on any day.
+    (Where a calendar week still matters — the Sunday text — it starts Monday.)
     """
     today = today or date.today()
-    this_monday = today - timedelta(days=today.weekday())
-    out: list[int | None] = []
-    for back in range(weeks, 0, -1):
-        start = this_monday - timedelta(weeks=back)
-        days = [start + timedelta(days=i) for i in range(7)]
-        rows = journal_days(days)
-        # A week the mirror only partly covers under-counts for a reason that has
-        # nothing to do with Alex — the week of Jul 13 has notes for 4 of 7 days
-        # (the mirror starts Jul 16) and scored 0. Majority-missing is unknown.
-        if sum(1 for _, _, why in rows if why == "no note") > len(rows) / 2:
-            out.append(None)
-            continue
-        out.append(sum(1 for _, ok, _ in rows if ok))
-    return out
+    return [today - timedelta(days=i) for i in range(6, -1, -1)]
+
+
+def rolling_7(end: date) -> int | None:
+    """Journaled days in the 7-day window ending on `end`, or None if unknown."""
+    rows = journal_days([end - timedelta(days=i) for i in range(6, -1, -1)])
+    # A window the mirror only partly covers under-counts for a reason that has
+    # nothing to do with Alex — the week of Jul 13 has notes for 4 of 7 days
+    # (the mirror starts Jul 16) and scored 0. Majority-missing is unknown.
+    if sum(1 for _, _, why in rows if why == "no note") > len(rows) / 2:
+        return None
+    return sum(1 for _, ok, _ in rows if ok)
+
+
+def journal_history(days: int = 14, today: date | None = None) -> list[int | None]:
+    """The rolling-7 value sampled once per day, for the last `days` days.
+
+    Consecutive points share six of seven days, so the line moves smoothly
+    instead of stepping — the whole reason to sample daily rather than weekly.
+
+    ⚠️ A window with no data is `None` (unknown), never 0, and renders as a blank
+    cell. The Craft mirror only reaches back to 2026-07-16; scoring the earlier
+    windows as zero drew floor blocks that read as "you journaled nothing" when
+    the truth was "nothing was mirrored yet."
+    """
+    today = today or date.today()
+    return [rolling_7(today - timedelta(days=i)) for i in range(days - 1, -1, -1)]
 
 
 def collect() -> dict:
-    rows = journal_days(this_week())
+    rows = journal_days(last_7_days())
     hit = sum(1 for _, ok, _ in rows if ok)
     since, note = days_since_publish()
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""habits — an at-a-glance weekly dashboard for the things a machine can already see.
+"""habits — an at-a-glance dashboard for the things a machine can already see.
+
+Every window is a ROLLING 7 days ending today, never a calendar week.
 
 Renders only. Everything slow (API calls, vault scans) happens in `habits refresh`
 so that pulling this up is instant. Sources that are stale or missing render as a
@@ -64,33 +66,19 @@ class Reading:
     def missing(self) -> bool:
         return self.value is None
 
-    # Set for metrics that accumulate over the week (counts, days-out-of-7).
-    # A weekly threshold must NOT fire on a Tuesday just because the week is
-    # young — a dashboard that says you are failing every Monday is one you
-    # stop opening. Mid-week, "off" means only "can no longer be reached".
-    cumulative: bool = False
-    days_left: int = 0
-
     @property
     def off_track(self) -> bool:
+        """Every window is a ROLLING 7 days, so this is always a fair comparison.
+
+        Calendar weeks needed a whole pace/days-left apparatus to avoid calling
+        you a failure every Monday, and the number only meant anything on Sunday.
+        A rolling window deletes the problem instead of managing it.
+        """
         if self.missing:
             return False
         if self.direction == "max":
             return self.value > self.threshold
-        if self.cumulative and self.days_left > 0:
-            return self.value + self.days_left < self.threshold
         return self.value < self.threshold
-
-    @property
-    def on_pace(self) -> bool:
-        """Mid-week, still reachable but not yet met."""
-        return (
-            self.cumulative
-            and self.days_left > 0
-            and not self.missing
-            and not self.off_track
-            and self.value < self.threshold
-        )
 
     def surging(self, multiplier: float) -> bool:
         """Notably MORE active than usual — the other thing worth surfacing."""
@@ -139,10 +127,6 @@ def load_state() -> dict:
     return merged
 
 
-def week_start(d: date) -> date:
-    return d - timedelta(days=d.weekday())
-
-
 def hours_since(stamp: str | None) -> float | None:
     if not stamp:
         return None
@@ -154,8 +138,6 @@ def hours_since(stamp: str | None) -> float | None:
 
 
 def build_readings(cfg: dict, state: dict) -> list[Reading]:
-    today = date.today()
-    days_left = 6 - today.weekday()  # 0 on Sunday, the last day of the week
     readings = []
     for key, spec in cfg["metrics"].items():
         entry = state.get(key) or {}
@@ -172,19 +154,17 @@ def build_readings(cfg: dict, state: dict) -> list[Reading]:
                 history=entry.get("history"),
                 stale_hours=hours_since(entry.get("written_at")),
                 provisional=entry.get("provisional", False),
-                cumulative=unit in ("count", "days7"),
-                days_left=days_left,
             )
         )
     return readings
 
 
 SPARK = "▁▂▃▄▅▆▇█"
-SPARK_WIDTH = 8
+SPARK_WIDTH = 14  # rolling-7 sampled once per day — a smooth trend, not 8 steps
 
 
 def sparkline(values: list[float] | None, width: int = SPARK_WIDTH) -> str:
-    """8 weeks of history as one row of blocks.
+    """History as one row of blocks — the rolling-7 value sampled daily.
 
     Glyphs verified on Alex's terminal (Ghostty/JetBrains Mono) 2026-08-11 with a
     JAGGED test row — an ascending staircase hides misalignment, which is how the
@@ -253,13 +233,14 @@ def render(cfg: dict, state: dict, color: bool = True) -> str:
     stale_limit = cfg.get("stale_after_hours", 26)
     mult = cfg.get("surge_multiplier", 1.5)
 
-    ws = week_start(date.today())
+    since = date.today() - timedelta(days=6)
     lines = [""]
     lines.append(
         "  "
-        + c(BOLD, f"WEEK OF {ws.strftime('%b %-d').upper()}")
-        + "        "
-        + c(DIM, "● hit   · on pace   ○ off   ▲ surging   — no data")
+        + c(BOLD, "LAST 7 DAYS")
+        + c(DIM, f"  {since:%b %-d}–{date.today():%b %-d}")
+        + "      "
+        + c(DIM, "● on track   ○ off   ▲ surging   — no data")
     )
     lines.append("")
 
@@ -268,16 +249,12 @@ def render(cfg: dict, state: dict, color: bool = True) -> str:
             mark = c(DIM, "—")
         elif r.off_track:
             mark = c(RED, "○")
-        elif r.on_pace:
-            mark = c(DIM, "·")
         elif r.surging(mult):
             mark = c(YELLOW, "▲")
         else:
             mark = c(GREEN, "●")
 
         note = r.note
-        if r.on_pace and not note:
-            note = f"{r.days_left}d left in week"
         if r.stale_hours is not None and r.stale_hours > stale_limit:
             age = f"{int(r.stale_hours / 24)}d old" if r.stale_hours >= 48 else "stale"
             note = f"{note}  ({age})" if note else f"({age})"
