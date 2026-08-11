@@ -67,11 +67,16 @@ apparatus just to avoid reading as failure all week. A rolling window always
 means the same thing on any day — and deleting the calendar week deleted that
 code. Where a calendar week still matters (the Sunday text), it starts Monday.
 
-**Sparklines are 0-anchored, so flat means flat.** Each point is the rolling-7
-value sampled that day, so consecutive points share six of seven days and the
-line moves smoothly. The scale runs 0..max rather than min..max: a metric sitting
-steadily at 6/7 *should* look level, not dramatic. Rescaling to the observed
-range would turn noise into a story.
+**Pick the mark by the shape of the data.** Daily yes/no habits get a 7-day
+strip (`●●●●○●●`) — one cell per day of the window, which shows *which* day was
+missed, not just how many. Continuous series (sleep hours) get a sparkline.
+
+This was learned the ugly way. Journaling first shipped as an eighth-block
+sparkline anchored at zero, which was mathematically honest and visually a
+**solid black bar**: values sitting high and flat (6–7 of 7) fill every cell to
+near-full height, adjacent cells merge, and the result reads as a redaction.
+Worse, it was defended on theory — *"flat should look flat"* — in the message
+right after promising to look at things on the real screen first.
 
 **Look at the glyphs on the real terminal.** `▁▂▃▄▅▆▇█` was verified in Ghostty /
 JetBrains Mono with a *jagged* test row — an ascending staircase hides

@@ -59,6 +59,7 @@ class Reading:
     unit: str
     note: str = ""
     history: list[float] | None = None
+    days: list | None = None
     stale_hours: float | None = None
     provisional: bool = False
 
@@ -152,6 +153,7 @@ def build_readings(cfg: dict, state: dict) -> list[Reading]:
                 unit=unit,
                 note=entry.get("note", ""),
                 history=entry.get("history"),
+                days=entry.get("days"),
                 stale_hours=hours_since(entry.get("written_at")),
                 provisional=entry.get("provisional", False),
             )
@@ -161,6 +163,32 @@ def build_readings(cfg: dict, state: dict) -> list[Reading]:
 
 SPARK = "▁▂▃▄▅▆▇█"
 SPARK_WIDTH = 14  # rolling-7 sampled once per day — a smooth trend, not 8 steps
+
+# The 7-day strip: one cell per day of the rolling window, oldest on the left.
+STRIP_HIT, STRIP_MISS, STRIP_UNKNOWN = "●", "○", "·"
+
+
+def strip(days: list | None, width: int = 7) -> str:
+    """One cell per day of the rolling window: did it happen, or not.
+
+    ⚠️ This replaced an eighth-block sparkline that rendered as a SOLID BLACK BAR
+    on 2026-08-11. A count metric sitting high and flat (journaling at 6–7 of 7)
+    fills every cell to near-full height, and adjacent cells merge into an
+    unbroken rectangle — unreadable, and it reads as a redaction. Anchoring the
+    scale at zero was mathematically honest and visually wrong.
+
+    A strip cannot brick: every cell is a discrete glyph on its own baseline. It
+    also carries more information for a daily habit — *which* days were missed,
+    not merely how many. Sparklines stay for continuous series (sleep hours),
+    where the values actually vary.
+    """
+    if not days:
+        return " " * width
+    cells = list(days)[-width:]
+    pad = " " * (width - len(cells))
+    return pad + "".join(
+        STRIP_UNKNOWN if d is None else (STRIP_HIT if d else STRIP_MISS) for d in cells
+    )
 
 
 def sparkline(values: list[float] | None, width: int = SPARK_WIDTH) -> str:
@@ -261,11 +289,11 @@ def render(cfg: dict, state: dict, color: bool = True) -> str:
         if r.provisional:
             note = f"{note}  [provisional]" if note else "[provisional]"
 
-        spark = sparkline(r.history)
+        chart = strip(r.days) if r.days else sparkline(r.history, width=7)
         lines.append(
             f"  {mark} {r.label:<11}{fmt_value(r):<8}"
             + c(DIM, f"{fmt_threshold(r):<7}")
-            + f"{c(DIM, spark)}  "
+            + f"{c(DIM, chart)}   "
             + (c(DIM, note) if note else "")
         )
 

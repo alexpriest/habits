@@ -180,7 +180,7 @@ def collect() -> dict:
             "value": hit,
             "note": "",
             "provisional": True,
-            "history": journal_history(),
+            "days": [ok for _, ok, _ in rows],
             "detail": [{"date": str(d), "journaled": ok, "why": why} for d, ok, why in rows],
         }
     }
