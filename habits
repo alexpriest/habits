@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""habits — an at-a-glance weekly dashboard for the things a machine can already see.
+
+Renders only. Everything slow (API calls, vault scans) happens in `habits refresh`
+so that pulling this up is instant. Sources that are stale or missing render as a
+dash with an age marker — never a fabricated value.
+
+Config: ~/.config/habits/config.json
+State:  ~/.local/state/habits/{local,mcp}.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+CONFIG_PATH = Path.home() / ".config" / "habits" / "config.json"
+STATE_DIR = Path.home() / ".local" / "state" / "habits"
+SOURCES = ("local", "mcp")
+
+# Every metric: label, direction, threshold, unit renderer.
+# direction "min" -> off track when value < threshold
+# direction "max" -> off track when value > threshold  (days-since style)
+DEFAULTS: dict = {
+    "metrics": {
+        "lifts": {"label": "lifts", "direction": "min", "threshold": 1, "unit": "count"},
+        "sleep": {"label": "sleep", "direction": "min", "threshold": 6.0, "unit": "hours"},
+        "rides": {"label": "rides", "direction": "min", "threshold": 3, "unit": "count"},
+        "journal": {"label": "journal", "direction": "min", "threshold": 4, "unit": "days7"},
+        "writing": {"label": "writing", "direction": "max", "threshold": 30, "unit": "daysago"},
+        "outreach": {"label": "outreach", "direction": "min", "threshold": 3, "unit": "count"},
+    },
+    "surge_multiplier": 1.5,
+    "stale_after_hours": 26,
+}
+
+RESET = "\033[0m"
+DIM = "\033[2m"
+BOLD = "\033[1m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+
+
+@dataclass
+class Reading:
+    key: str
+    label: str
+    value: float | None
+    threshold: float
+    direction: str
+    unit: str
+    note: str = ""
+    history: list[float] | None = None
+    stale_hours: float | None = None
+    provisional: bool = False
+
+    @property
+    def missing(self) -> bool:
+        return self.value is None
+
+    # Set for metrics that accumulate over the week (counts, days-out-of-7).
+    # A weekly threshold must NOT fire on a Tuesday just because the week is
+    # young — a dashboard that says you are failing every Monday is one you
+    # stop opening. Mid-week, "off" means only "can no longer be reached".
+    cumulative: bool = False
+    days_left: int = 0
+
+    @property
+    def off_track(self) -> bool:
+        if self.missing:
+            return False
+        if self.direction == "max":
+            return self.value > self.threshold
+        if self.cumulative and self.days_left > 0:
+            return self.value + self.days_left < self.threshold
+        return self.value < self.threshold
+
+    @property
+    def on_pace(self) -> bool:
+        """Mid-week, still reachable but not yet met."""
+        return (
+            self.cumulative
+            and self.days_left > 0
+            and not self.missing
+            and not self.off_track
+            and self.value < self.threshold
+        )
+
+    def surging(self, multiplier: float) -> bool:
+        """Notably MORE active than usual — the other thing worth surfacing."""
+        if self.missing or self.direction != "min" or not self.history:
+            return False
+        past = [h for h in self.history if h is not None]
+        if len(past) < 3:
+            return False
+        median = statistics.median(past)
+        return median > 0 and self.value >= median * multiplier
+
+
+def load_config() -> dict:
+    cfg = json.loads(json.dumps(DEFAULTS))
+    if CONFIG_PATH.exists():
+        try:
+            user = json.loads(CONFIG_PATH.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"habits: bad config at {CONFIG_PATH}: {e}", file=sys.stderr)
+            return cfg
+        for key, val in user.items():
+            if key == "metrics" and isinstance(val, dict):
+                for mkey, mval in val.items():
+                    cfg["metrics"].setdefault(mkey, {}).update(mval)
+            else:
+                cfg[key] = val
+    return cfg
+
+
+def load_state() -> dict:
+    """Merge every source file. One file per writer so concurrent refreshes
+    cannot clobber each other — the failure mode that ate 53 of 60 vault writes."""
+    merged: dict = {}
+    for name in SOURCES:
+        path = STATE_DIR / f"{name}.json"
+        if not path.exists():
+            continue
+        try:
+            blob = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        written = blob.get("written_at")
+        for key, entry in (blob.get("metrics") or {}).items():
+            entry.setdefault("written_at", written)
+            merged[key] = entry
+    return merged
+
+
+def week_start(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def hours_since(stamp: str | None) -> float | None:
+    if not stamp:
+        return None
+    try:
+        then = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return (datetime.now(then.tzinfo) - then).total_seconds() / 3600
+
+
+def build_readings(cfg: dict, state: dict) -> list[Reading]:
+    today = date.today()
+    days_left = 6 - today.weekday()  # 0 on Sunday, the last day of the week
+    readings = []
+    for key, spec in cfg["metrics"].items():
+        entry = state.get(key) or {}
+        unit = spec.get("unit", "count")
+        readings.append(
+            Reading(
+                key=key,
+                label=spec.get("label", key),
+                value=entry.get("value"),
+                threshold=spec["threshold"],
+                direction=spec["direction"],
+                unit=unit,
+                note=entry.get("note", ""),
+                history=entry.get("history"),
+                stale_hours=hours_since(entry.get("written_at")),
+                provisional=entry.get("provisional", False),
+                cumulative=unit in ("count", "days7"),
+                days_left=days_left,
+            )
+        )
+    return readings
+
+
+SPARK = "▁▂▃▄▅▆▇█"
+SPARK_WIDTH = 8
+
+
+def sparkline(values: list[float] | None, width: int = SPARK_WIDTH) -> str:
+    """8 weeks of history as one row of blocks.
+
+    Glyphs verified on Alex's terminal (Ghostty/JetBrains Mono) 2026-08-11 with a
+    JAGGED test row — an ascending staircase hides misalignment, which is how the
+    `left` build passed four checks and still looked wrong on screen.
+
+    Always exactly `width` cells so every row's columns line up. Zero always
+    renders as the floor glyph, so "did nothing" is visibly distinct from "did a
+    little" even when the series is flat.
+
+    ⚠️ `None` means NO DATA and renders as a BLANK cell, holding its position.
+    It must never collapse into the floor glyph: on 2026-08-11 the first build
+    drew five weeks of floor blocks for weeks that simply predated the Craft
+    mirror, which reads as "you journaled nothing" instead of "we don't know."
+    """
+    if not values:
+        return " " * width
+    series = list(values)[-width:]
+    pad = " " * (width - len(series))
+    known = [v for v in series if v is not None]
+    if not known:
+        return " " * width
+    top = max(known)
+    out = []
+    for v in series:
+        if v is None:
+            out.append(" ")
+        elif v <= 0 or top <= 0:
+            out.append(SPARK[0])
+        else:
+            # Scale 1..top across the upper 7 levels; the floor is reserved for 0.
+            idx = 1 + round((v / top) * (len(SPARK) - 2))
+            out.append(SPARK[min(idx, len(SPARK) - 1)])
+    return pad + "".join(out)
+
+
+def fmt_value(r: Reading) -> str:
+    if r.missing:
+        return "—"
+    if r.unit == "hours":
+        whole = int(r.value)
+        mins = int(round((r.value - whole) * 60))
+        return f"{whole}h{mins:02d}"
+    if r.unit == "days7":
+        return f"{int(r.value)}/7"
+    if r.unit == "daysago":
+        return f"{int(r.value)}d"
+    v = r.value
+    return str(int(v)) if float(v).is_integer() else f"{v:g}"
+
+
+def fmt_threshold(r: Reading) -> str:
+    sign = "≥" if r.direction == "min" else "≤"
+    t = r.threshold
+    if r.unit == "hours":
+        return f"{sign}{t:g}h"
+    if r.unit == "daysago":
+        return f"{sign}{int(t)}d"
+    return f"{sign}{int(t)}"
+
+
+def render(cfg: dict, state: dict, color: bool = True) -> str:
+    def c(code: str, text: str) -> str:
+        return f"{code}{text}{RESET}" if color else text
+
+    readings = build_readings(cfg, state)
+    stale_limit = cfg.get("stale_after_hours", 26)
+    mult = cfg.get("surge_multiplier", 1.5)
+
+    ws = week_start(date.today())
+    lines = [""]
+    lines.append(
+        "  "
+        + c(BOLD, f"WEEK OF {ws.strftime('%b %-d').upper()}")
+        + "        "
+        + c(DIM, "● hit   · on pace   ○ off   ▲ surging   — no data")
+    )
+    lines.append("")
+
+    for r in readings:
+        if r.missing:
+            mark = c(DIM, "—")
+        elif r.off_track:
+            mark = c(RED, "○")
+        elif r.on_pace:
+            mark = c(DIM, "·")
+        elif r.surging(mult):
+            mark = c(YELLOW, "▲")
+        else:
+            mark = c(GREEN, "●")
+
+        note = r.note
+        if r.on_pace and not note:
+            note = f"{r.days_left}d left in week"
+        if r.stale_hours is not None and r.stale_hours > stale_limit:
+            age = f"{int(r.stale_hours / 24)}d old" if r.stale_hours >= 48 else "stale"
+            note = f"{note}  ({age})" if note else f"({age})"
+        if r.provisional:
+            note = f"{note}  [provisional]" if note else "[provisional]"
+
+        spark = sparkline(r.history)
+        lines.append(
+            f"  {mark} {r.label:<11}{fmt_value(r):<8}"
+            + c(DIM, f"{fmt_threshold(r):<7}")
+            + f"{c(DIM, spark)}  "
+            + (c(DIM, note) if note else "")
+        )
+
+    lines.append("")
+    countdown = read_left()
+    if countdown:
+        lines.append("  " + c(DIM, countdown))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def read_left() -> str:
+    """The death clock, if it's installed. Same motivation layer, one surface."""
+    import subprocess
+
+    binary = Path.home() / ".local" / "bin" / "left"
+    if not binary.exists():
+        return ""
+    try:
+        out = subprocess.run(
+            [str(binary)], capture_output=True, text=True, timeout=3
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip()
+
+
+# Every row MUST be exactly 8 characters — the point of the test is column
+# alignment, and a short row proves nothing. (Shipped 4-char rows once. Once.)
+GLYPH_CANDIDATES = [
+    ("eighth blocks — ascending", "▁▂▃▄▅▆▇█"),
+    ("eighth blocks — jagged", "▃▇▂▆▁█▄▅"),
+    ("full/empty (proven in left)", "████░░░░"),
+    ("half blocks", "▄▀▄▀▄▀▄▀"),
+    ("status dots", "●○●○◉◌◉◌"),
+    ("triangles", "▲▼△▽▲▼△▽"),
+    ("arrows", "↑↓→←↑↓→←"),
+    ("shade ramp", "░░▒▒▓▓██"),
+]
+
+
+def glyph_test() -> str:
+    """Print candidates so they can be LOOKED AT on the real terminal.
+
+    Five iterations of `left` passed every check runnable in a terminal and still
+    rendered wrong on screen. Nothing visual gets called done from a script.
+    """
+    out = ["", "  Each row must be exactly 8 cells wide and align with the others.", ""]
+    out.append("  " + "12345678")
+    out.append("  " + "-" * 8)
+    for name, glyphs in GLYPH_CANDIDATES:
+        out.append(f"  {glyphs:<8}  {name}")
+    out.append("")
+    out.append("  Look for: gaps, glyphs taller/shorter than the row, or")
+    out.append("  anything that breaks the 8-cell column above.")
+    out.append("")
+    return "\n".join(out)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Weekly habit dashboard.")
+    ap.add_argument("--json", action="store_true", help="raw state as JSON")
+    ap.add_argument("--glyph-test", action="store_true", help="print glyph candidates")
+    ap.add_argument("--no-color", action="store_true", help="disable ANSI color")
+    args = ap.parse_args()
+
+    if args.glyph_test:
+        print(glyph_test())
+        return 0
+
+    cfg = load_config()
+    state = load_state()
+
+    if args.json:
+        print(json.dumps({"config": cfg, "state": state}, indent=2, default=str))
+        return 0
+
+    color = not args.no_color and sys.stdout.isatty()
+    print(render(cfg, state, color=color))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
