@@ -17,8 +17,11 @@ from pathlib import Path
 
 VAULT = Path.home() / "Obsidian" / "alexpriest"
 CRAFT_DAILY = VAULT / "Craft" / "Daily Notes"
-SITE_WRITING = VAULT / "Site" / "Writing"
-STATE = Path.home() / ".local" / "state" / "habits" / "local.json"
+# Site/ moved out of the main vault to the dedicated content vault (ANT-429,
+# 2026-08-13). The main vault publishes nothing and has no Site/ at all.
+CONTENT_VAULT = Path.home() / "Obsidian" / "alexpriest-content"
+SITE_WRITING = CONTENT_VAULT / "Site" / "Writing"
+STATE = Path.home() / "Code" / "tools" / "habits" / "state" / "local.json"
 
 # A voice memo transcript, written by the voice-memo-transcribe pipeline.
 VOICE_MEMO = re.compile(r"^\s*\+?\s*#{1,4}\s*Voice memo:", re.M)
