@@ -33,7 +33,6 @@ you stop opening.
 | journal | Craft daily notes (mirror) | < 4 days this week |
 | writing | `Site/Writing` published (content vault) | nothing in > 30 days |
 | outreach | Gmail sent + iMessage | < 3 *initiated* this week |
-| fasting | Zero export, else the weekly answer | held < 4 of the 5 weekdays |
 
 Reading is deliberately *not* tracked — it's a question the Sunday text asks, and
 the answer gets logged. Spending was cut.
@@ -47,18 +46,7 @@ thread's *first sender* must be Alex, because `in:sent` labels an entire thread
 if any one message in it was sent, so replying to a marketing blast otherwise
 drags that blast in under its own subject.
 
-**Fasting is the one row a machine cannot see for itself.** Zero has no API — no
-developer docs across all 42 help-centre articles, and HealthKit has no fasting
-type for any app to write into, so nothing reaches this Mac on its own. Zero's
-"Download My Data" export is the only supported path: `import_zero.py` ingests
-it, and the weekly text covers the days since the last export. Both write the
-same log with a `source`, and a later record supersedes an earlier one, so an
-import silently corrects whatever the weekly answer got wrong.
-
-The eating-window log lives in the **vault**, not in `state/` — it is the only
-metric here whose history cannot be rebuilt from some other system:
-
-    ~/Obsidian/alexpriest/Claude/Coach/Data/eating-window.jsonl
+Fasting was built and then parked the same day — see `parked/README.md`.
 
 ## Layout
 
@@ -67,8 +55,8 @@ habits               the CLI (renders only)
 collect_local.py     vault-backed: journal, writing
 collect_api.py       Hevy, Oura, Strava
 collect_outreach.py  iMessage + Gmail, conversations started
-collect_fasting.py   the eating-window log
-import_zero.py       ingest a Zero "Download My Data" export
+mcp_client.py        minimal MCP Streamable-HTTP client (rides)
+parked/              built, not wired — see parked/README.md
 sunday_text.py       the weekly accountability text
 install.sh           symlink, config, launchd — per machine
 ```

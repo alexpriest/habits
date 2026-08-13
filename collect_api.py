@@ -6,11 +6,17 @@ Writes state/api.json.
 Credentials resolve env-first, then 1Password. Nothing is ever read from a
 command line, so a secret cannot end up in shell history or a process listing.
 
-    HABITS_HEVY_API_KEY      or  op://Claude/Hevy API/credential
-    HABITS_OURA_TOKEN        or  op://Claude/Oura API/credential
-    HABITS_STRAVA_CLIENT_ID  or  op://Claude/Strava API/client_id
-    HABITS_STRAVA_SECRET     or  op://Claude/Strava API/client_secret
-    HABITS_STRAVA_REFRESH    or  op://Claude/Strava API/refresh_token
+    lifts   Hevy REST          op://Claude/Hevy API/credential
+    rides   strava-mcp on Railway, over MCP Streamable HTTP
+                               op://Claude/Strava MCP/{credential,url}
+    sleep   Oura REST          op://Claude/Oura API/credential  (personal access token)
+
+Rides go through Alex's own deployed MCP server rather than the Strava API
+directly, because the Strava refresh token lives on that server's Railway volume
+and never touches this machine — the server already refreshes it, so there is
+nothing here to expire. Oura's server speaks the OLDER HTTP+SSE MCP transport
+(/sse + /message; /mcp 404s), so it uses the REST API and a personal access
+token instead of a second transport implementation for a single caller.
 
 Each source fails INDEPENDENTLY. A missing Oura token must not cost you the lift
 count, and a source that could not be read is simply absent from the state file,
@@ -24,11 +30,16 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import re
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mcp_client import McpError, call_tool  # noqa: E402
 
 STATE = Path.home() / "Code" / "tools" / "habits" / "state" / "api.json"
 
@@ -163,12 +174,6 @@ def hevy_lifts(today: date) -> dict:
 def oura_sleep(today: date) -> dict:
     token = secret("HABITS_OURA_TOKEN", "op://Claude/Oura API/credential")
     start = today - timedelta(days=HISTORY_DAYS)
-    payload = get_json(
-        "https://api.ouraring.com/v2/usercollection/daily_sleep",
-        {"Authorization": f"Bearer {token}"},
-        {"start_date": str(start), "end_date": str(today)},
-    )
-    # daily_sleep carries the score; the durations live on the sleep periods.
     periods = get_json(
         "https://api.ouraring.com/v2/usercollection/sleep",
         {"Authorization": f"Bearer {token}"},
@@ -178,17 +183,14 @@ def oura_sleep(today: date) -> dict:
     for p in periods.get("data") or []:
         if p.get("type") in ("deleted", "rest"):
             continue
-        day = p.get("day")
-        secs = p.get("total_sleep_duration")
+        day, secs = p.get("day"), p.get("total_sleep_duration")
         if not day or not secs:
             continue
-        d = date.fromisoformat(day)
-        # Naps add to the day's total; Oura splits a broken night into periods.
-        by_day[d] = by_day.get(d, 0) + int(secs)
+        # Oura splits a broken night into periods; naps add to the day's total.
+        by_day[date.fromisoformat(day)] = by_day.get(date.fromisoformat(day), 0) + int(secs)
 
     win = window_days(today)
-    nightly = [by_day.get(d) for d in win]
-    known = [v for v in nightly if v]
+    known = [by_day[d] for d in win if d in by_day]
     if not known:
         raise SourceError("no sleep periods in the window")
 
@@ -203,53 +205,65 @@ def oura_sleep(today: date) -> dict:
 # ----------------------------------------------------------------- Strava
 
 
+# The MCP server renders activities for humans, so this reads its output rather
+# than JSON. Strict on purpose: if the format ever changes, the count drops and
+# `note` says how many blocks failed to parse — it must never silently read 0.
+ACTIVITY_HEAD = re.compile(r"^(?P<name>.+?)\s+\((?P<sport>\w+)\)\s*$")
+ACTIVITY_DATE = re.compile(r"^\s*Date:\s*(\d{4}-\d{2}-\d{2})")
+ACTIVITY_TIME = re.compile(r"^\s*Moving time:\s*(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?")
+
+
+def parse_activities(text: str) -> tuple[list[dict], int]:
+    """(activities, unparsed_block_count) from the MCP server's rendering."""
+    blocks, current = [], None
+    for raw in text.splitlines():
+        head = ACTIVITY_HEAD.match(raw.strip()) if raw.strip() and not raw.startswith(" ") else None
+        if head:
+            if current:
+                blocks.append(current)
+            current = {"sport": head.group("sport"), "date": None, "seconds": None}
+            continue
+        if current is None:
+            continue
+        m = ACTIVITY_DATE.match(raw)
+        if m:
+            current["date"] = m.group(1)
+        m = ACTIVITY_TIME.match(raw)
+        if m and any(m.groups()):
+            h, mi, s = (int(g or 0) for g in m.groups())
+            current["seconds"] = h * 3600 + mi * 60 + s
+    if current:
+        blocks.append(current)
+
+    good = [b for b in blocks if b["date"] and b["seconds"] is not None]
+    return good, len(blocks) - len(good)
+
+
 def strava_rides(today: date) -> dict:
-    client_id = secret("HABITS_STRAVA_CLIENT_ID", "op://Claude/Strava API/client_id")
-    client_secret = secret("HABITS_STRAVA_SECRET", "op://Claude/Strava API/client_secret")
-    refresh = secret("HABITS_STRAVA_REFRESH", "op://Claude/Strava API/refresh_token")
-
-    body = urllib.parse.urlencode(
-        {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh,
-        }
-    ).encode()
-    req = urllib.request.Request(
-        "https://www.strava.com/oauth/token",
-        data=body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+    base = secret("HABITS_STRAVA_MCP_URL", "op://Claude/Strava MCP/url")
+    token = secret("HABITS_STRAVA_MCP_TOKEN", "op://Claude/Strava MCP/credential")
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            token = json.loads(resp.read().decode())["access_token"]
-    except (urllib.error.URLError, KeyError, json.JSONDecodeError) as e:
-        raise SourceError(f"strava token refresh failed ({type(e).__name__})") from e
+        text = call_tool(
+            base, token, "get-recent-activities",
+            {"start_date": str(today - timedelta(days=FETCH_DAYS)), "per_page": 100},
+        )
+    except McpError as e:
+        raise SourceError(str(e)) from e
 
-    after = datetime.combine(
-        today - timedelta(days=FETCH_DAYS), datetime.min.time(), timezone.utc
-    )
-    activities = get_json(
-        "https://www.strava.com/api/v3/athlete/activities",
-        {"Authorization": f"Bearer {token}"},
-        {"after": int(after.timestamp()), "per_page": 100},
-    )
+    activities, unparsed = parse_activities(text)
+    if not activities and unparsed:
+        raise SourceError(f"could not parse any of {unparsed} activity blocks")
 
-    hit: set[date] = set()
-    for a in activities:
-        sport = a.get("sport_type") or a.get("type")
-        if sport not in RIDE_TYPES:
-            continue
-        if (a.get("moving_time") or 0) < MIN_RIDE_MINUTES * 60:
-            continue
-        stamp = a.get("start_date_local") or a.get("start_date")
-        if not stamp:
-            continue
-        hit.add(datetime.fromisoformat(stamp.replace("Z", "+00:00")).date())
-
+    hit = {
+        date.fromisoformat(a["date"])
+        for a in activities
+        if a["sport"] in RIDE_TYPES and a["seconds"] >= MIN_RIDE_MINUTES * 60
+    }
     out = count_metric(hit, today)
-    out["note"] = f"≥{MIN_RIDE_MINUTES}min, no e-bike"
+    note = f"\u2265{MIN_RIDE_MINUTES}min, no e-bike"
+    if unparsed:
+        note += f" ({unparsed} unreadable)"
+    out["note"] = note
     return out
 
 

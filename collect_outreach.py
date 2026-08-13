@@ -44,7 +44,7 @@ SELF_HANDLES = {"+12702871307", "hello@alexpriest.com", "alex.priest@gmail.com"}
 # The agent personas text him from these. Talking to Kit is not outreach.
 AGENT_HANDLES = {"kit@alexpriest.com", "paloma@alexpriest.com"}
 
-DEFAULT_GAP_DAYS = 14
+DEFAULT_GAP_DAYS = 30
 WINDOW_DAYS = 7
 HISTORY_DAYS = 14
 # Enough history to measure a gap that predates the window.
@@ -180,25 +180,74 @@ def gmail_initiations(gap_days: int) -> list[dict]:
         raise RuntimeError(f"gog exit {proc.returncode}: {proc.stderr.strip()[:200]}")
 
     payload = json.loads(proc.stdout or "{}")
-    out = []
+    candidates = []
     for thread in payload.get("threads") or []:
         if not ALEX_SENDER.search(str(thread.get("from") or "")):
             continue
-        subject = (thread.get("subject") or "").strip()
         stamp = (thread.get("date") or "")[:10]
         try:
             date.fromisoformat(stamp)
         except ValueError:
             continue
+        candidates.append((thread.get("id"), (thread.get("subject") or "").strip(), stamp))
+
+    # Apply the SAME dormancy test texts get. Without it, email counted every new
+    # thread Alex opened, and in a representative week (2026-08-13) all four hits
+    # were transactional vendor mail — a whiteboard quote, a load ETA, a tree-work
+    # objection, a backpack strap request. Emailing your contractor twice a week
+    # is not reconnecting with anyone, and it was inflating the number by a third.
+    since = date.today() - timedelta(days=WINDOW_DAYS)
+    seen_recently: dict[str, bool] = {}
+    out = []
+    for thread_id, subject, stamp in candidates:
+        addr = thread_recipient(thread_id, env)
+        if addr is None:
+            continue
+        if addr not in seen_recently:
+            seen_recently[addr] = contacted_before(addr, since, gap_days, env)
+        if seen_recently[addr]:
+            continue
         out.append(
             {
-                "who": subject[:60] or "(no subject)",
+                "who": f"{addr} — {subject[:44]}" if subject else addr,
                 "date": stamp,
                 "gap_days": None,
                 "channel": "email",
             }
         )
     return out
+
+
+def _gog(args: list[str], env: dict, timeout: int = 60):
+    proc = subprocess.run(
+        ["gog", "gmail", *args, "--json"],
+        capture_output=True, text=True, timeout=timeout, env=env,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+
+
+def thread_recipient(thread_id: str, env: dict) -> str | None:
+    """First To: address on the thread. None when it cannot be determined —
+    which drops the thread rather than guessing it is fresh outreach."""
+    blob = _gog(["get", str(thread_id)], env)
+    to = ((blob or {}).get("headers") or {}).get("to") or ""
+    match = re.search(r"[\w.+-]+@[\w.-]+\.\w+", to)
+    return match.group(0).lower() if match else None
+
+
+def contacted_before(addr: str, since: date, gap_days: int, env: dict) -> bool:
+    """Did Alex email this person in the `gap_days` BEFORE the current window?"""
+    blob = _gog(
+        ["search", f"in:sent to:{addr} after:{since - timedelta(days=gap_days)} "
+                   f"before:{since}", "--max", "1"],
+        env,
+    )
+    return bool((blob or {}).get("threads"))
 
 
 # ------------------------------------------------------------------ assemble

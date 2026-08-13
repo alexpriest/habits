@@ -41,7 +41,6 @@ if [[ ! -f "$CONFIG_DIR/config.json" ]]; then
     "lifts":    { "threshold": 1 },
     "sleep":    { "threshold": 6.0 },
     "rides":    { "threshold": 3 },
-    "fasting":  { "threshold": 4 },
     "journal":  { "threshold": 4 },
     "writing":  { "threshold": 30 },
     "outreach": { "threshold": 3 }
@@ -130,5 +129,4 @@ echo
 echo "  habits            the dashboard"
 echo "  habits refresh    run every collector"
 echo "  habits journal    day-by-day behind the journal row"
-echo "  habits fast --week mon,tue,fri    log the eating window"
 echo

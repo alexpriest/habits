@@ -34,7 +34,7 @@ STATE_DIR = Path.home() / "Code" / "tools" / "habits" / "state"
 # One file per WRITER, never per metric — two processes sharing a file is the
 # read-modify-write race that silently ate 53 of 60 concurrent vault writes.
 # Adding a collector means adding its name here.
-SOURCES = ("local", "api", "outreach", "fasting")
+SOURCES = ("local", "api", "outreach")
 
 # Every metric: label, direction, threshold, unit renderer.
 # direction "min" -> off track when value < threshold
@@ -44,9 +44,6 @@ DEFAULTS: dict = {
         "lifts": {"label": "lifts", "direction": "min", "threshold": 1, "unit": "count"},
         "sleep": {"label": "sleep", "direction": "min", "threshold": 6.0, "unit": "hours"},
         "rides": {"label": "rides", "direction": "min", "threshold": 3, "unit": "count"},
-        # 18:6 runs Mon–Fri only, so the denominator is 5 weekdays and never 7.
-        # Threshold 4 leaves room for one restaurant dinner that starts early.
-        "fasting": {"label": "fasting", "direction": "min", "threshold": 4, "unit": "weekdays"},
         "journal": {"label": "journal", "direction": "min", "threshold": 4, "unit": "days7"},
         "writing": {"label": "writing", "direction": "max", "threshold": 30, "unit": "daysago"},
         "outreach": {"label": "outreach", "direction": "min", "threshold": 3, "unit": "count"},
@@ -118,7 +115,12 @@ def load_config() -> dict:
         for key, val in user.items():
             if key == "metrics" and isinstance(val, dict):
                 for mkey, mval in val.items():
-                    cfg["metrics"].setdefault(mkey, {}).update(mval)
+                    # Only TUNE metrics the code knows about. A user file that
+                    # names a retired metric used to conjure a spec with no
+                    # `direction` and crash the whole dashboard on a KeyError —
+                    # a stale threshold should be ignored, never fatal.
+                    if mkey in cfg["metrics"]:
+                        cfg["metrics"][mkey].update(mval)
             else:
                 cfg[key] = val
     return cfg
@@ -202,12 +204,11 @@ def strip(days: list | None, width: int = 7) -> str:
     where the values actually vary.
     """
     if not days:
-        return " " * width
+        return " " * (width * 2 - 1)
     cells = list(days)[-width:]
-    pad = " " * (width - len(cells))
-    return pad + "".join(
-        STRIP_UNKNOWN if d is None else (STRIP_HIT if d else STRIP_MISS) for d in cells
-    )
+    marks = [STRIP_UNKNOWN if d is None else (STRIP_HIT if d else STRIP_MISS) for d in cells]
+    pad = "  " * (width - len(cells))
+    return pad + " ".join(marks)
 
 
 def sparkline(values: list[float] | None, width: int = SPARK_WIDTH) -> str:
@@ -233,17 +234,27 @@ def sparkline(values: list[float] | None, width: int = SPARK_WIDTH) -> str:
     known = [v for v in series if v is not None]
     if not known:
         return " " * width
-    top = max(known)
+    top, bottom = max(known), min(known)
+    # ⚠️ Scale to the OBSERVED RANGE, not to zero. Anchoring at zero is what made
+    # the sleep row a solid black slab on 2026-08-13: seven nights between 6.3h
+    # and 8.0h all land in the top eighth, every cell fills, and adjacent cells
+    # merge into a rectangle. Nobody needs a chart to be told sleep is not zero —
+    # the interesting variation is the 1.7h between his best night and his worst,
+    # and only a range-scaled axis can show it.
+    #
+    # A genuine zero still renders as the floor: if the series touches 0, the
+    # bottom of the range IS 0 and the scaling below puts it on SPARK[0].
+    span = top - bottom
     out = []
     for v in series:
         if v is None:
             out.append(" ")
-        elif v <= 0 or top <= 0:
-            out.append(SPARK[0])
+        elif span <= 0:
+            # Truly flat. A mid-height row is honest; a full-height one is not.
+            out.append(SPARK[len(SPARK) // 2])
         else:
-            # Scale 1..top across the upper 7 levels; the floor is reserved for 0.
-            idx = 1 + round((v / top) * (len(SPARK) - 2))
-            out.append(SPARK[min(idx, len(SPARK) - 1)])
+            idx = round((v - bottom) / span * (len(SPARK) - 1))
+            out.append(SPARK[max(0, min(idx, len(SPARK) - 1))])
     return pad + "".join(out)
 
 
@@ -310,7 +321,7 @@ def render(cfg: dict, state: dict, color: bool = True) -> str:
         if r.provisional:
             note = f"{note}  [provisional]" if note else "[provisional]"
 
-        chart = strip(r.days) if r.days else sparkline(r.history, width=7)
+        chart = strip(r.days) if r.days else f"{sparkline(r.history, width=13):<13}"
         lines.append(
             f"  {mark} {r.label:<11}{fmt_value(r):<8}"
             + c(DIM, f"{fmt_threshold(r):<7}")
