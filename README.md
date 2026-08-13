@@ -31,7 +31,7 @@ you stop opening.
 | sleep | Oura | 7-day average < 6h |
 | rides | Strava, ≥30 min | < 3 this week |
 | journal | Craft daily notes (mirror) | < 4 days this week |
-| writing | `Site/Writing` published | nothing in > 30 days |
+| writing | `Site/Writing` published (content vault) | nothing in > 30 days |
 | outreach | Gmail sent + iMessage | < 3 initiated this week |
 
 Reading is deliberately *not* tracked — it's a question the Sunday text asks, and
