@@ -32,17 +32,45 @@ you stop opening.
 | rides | Strava, ≥30 min | < 3 this week |
 | journal | Craft daily notes (mirror) | < 4 days this week |
 | writing | `Site/Writing` published (content vault) | nothing in > 30 days |
-| outreach | Gmail sent + iMessage | < 3 initiated this week |
+| outreach | Gmail sent + iMessage | < 3 *initiated* this week |
+| fasting | Zero export, else the weekly answer | held < 4 of the 5 weekdays |
 
 Reading is deliberately *not* tracked — it's a question the Sunday text asks, and
 the answer gets logged. Spending was cut.
 
+**Outreach counts conversations STARTED, not messages sent.** "Messages sent" is
+265 a week, mostly to Miranda and to live group chats, and would read as a hit
+forever. A conversation counts only when Alex sent the first message after 14
+days of silence — which surfaces the reconnections (Adam Pelavin after 49 days)
+and ignores the daily traffic. On email the test is different and simpler: the
+thread's *first sender* must be Alex, because `in:sent` labels an entire thread
+if any one message in it was sent, so replying to a marketing blast otherwise
+drags that blast in under its own subject.
+
+**Fasting is the one row a machine cannot see for itself.** Zero has no API — no
+developer docs across all 42 help-centre articles, and HealthKit has no fasting
+type for any app to write into, so nothing reaches this Mac on its own. Zero's
+"Download My Data" export is the only supported path: `import_zero.py` ingests
+it, and the weekly text covers the days since the last export. Both write the
+same log with a `source`, and a later record supersedes an earlier one, so an
+import silently corrects whatever the weekly answer got wrong.
+
+The eating-window log lives in the **vault**, not in `state/` — it is the only
+metric here whose history cannot be rebuilt from some other system:
+
+    ~/Obsidian/alexpriest/Claude/Coach/Data/eating-window.jsonl
+
 ## Layout
 
 ```
-habits              the CLI (renders only)
-collect_local.py    vault-backed metrics: journal, writing
-install.sh          symlink + config, per machine
+habits               the CLI (renders only)
+collect_local.py     vault-backed: journal, writing
+collect_api.py       Hevy, Oura, Strava
+collect_outreach.py  iMessage + Gmail, conversations started
+collect_fasting.py   the eating-window log
+import_zero.py       ingest a Zero "Download My Data" export
+sunday_text.py       the weekly accountability text
+install.sh           symlink, config, launchd — per machine
 ```
 
 - Config: `~/.config/habits/config.json` (thresholds; falls back to `DEFAULTS`)
@@ -99,7 +127,26 @@ printed rather than buried.
 
 - ✅ CLI, renderer, rolling-7 windows, 14-day sparklines, config, state merge
 - ✅ Local collectors: journal (+ 8-week history), writing
-- ⬜ Strava / Hevy / Oura collectors
-- ⬜ SwiftBar menu bar reader
-- ⬜ Refresh job (launchd, Mini) + Sunday 9pm text
-- ⬜ `habits journal` day-by-day subcommand
+- ✅ Outreach collector (iMessage + Gmail), conversations started
+- ✅ Fasting row, eating-window log, Zero export importer
+- ✅ SwiftBar menu bar reader
+- ✅ `habits refresh` / `habits journal` / `habits fast`
+- ✅ install.sh + launchd refresh (Mini, every 2h)
+- ✅ Weekly text written and dry-run clean — **plist NOT loaded**, run
+      `./install.sh --with-text` to schedule it
+- ⬜ Hevy / Oura / Strava need credentials in 1Password before they self-refresh.
+      Until then the seeded values age visibly. See *Credentials* below.
+
+## Credentials
+
+`collect_api.py` reads env first, then 1Password. Nothing is passed on a command
+line, so no secret lands in shell history or a process list.
+
+| Item | Where to get it |
+|---|---|
+| `op://Claude/Hevy API/credential` | hevy.com/settings?developer |
+| `op://Claude/Oura API/credential` | cloud.ouraring.com/personal-access-tokens |
+| `op://Claude/Strava API/client_id`, `client_secret`, `refresh_token` | already set on the Railway deploy of `strava-mcp-server` |
+
+The Strava trio already exists — it is in Railway's env for the MCP server, and
+`railway login` (browser) is the only thing standing between here and there.
