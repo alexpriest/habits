@@ -54,18 +54,36 @@ class SourceError(RuntimeError):
 
 
 def secret(env_var: str, op_ref: str) -> str:
+    """env -> op -> op inside an interactive zsh.
+
+    ⚠️ The third hop is not paranoia, it is the launchd case. OP_SERVICE_ACCOUNT_TOKEN
+    is defined in ~/.zshrc, and .zshrc is read ONLY by interactive shells — not by
+    `zsh -lc`, and certainly not by launchd, which runs no shell at all. Verified
+    2026-08-13 from the refresh job's own log: every `op read` sat there and hit
+    the 30-second timeout, because with no token `op` falls back to prompting a
+    human who is not there. `zsh -ic` sources .zshrc and resolves in under a
+    second from a clean environment.
+
+    Timeouts are short on purpose. Five secrets × a 30s hang was a two-and-a-half
+    minute job that looked like a network problem and was actually a missing
+    environment variable.
+    """
     val = os.environ.get(env_var)
     if val:
         return val.strip()
-    try:
-        proc = subprocess.run(
-            ["op", "read", op_ref], capture_output=True, text=True, timeout=30
-        )
-    except (OSError, subprocess.SubprocessError) as e:
-        raise SourceError(f"{env_var} unset and 1Password unavailable ({e})") from e
-    if proc.returncode != 0:
-        raise SourceError(f"{env_var} unset and `op read {op_ref}` failed")
-    return proc.stdout.strip()
+
+    attempts = (
+        ["op", "read", op_ref],
+        ["/bin/zsh", "-ic", f"op read {op_ref!r}"],
+    )
+    for argv in attempts:
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=12)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+    raise SourceError(f"{env_var} unset and `op read {op_ref}` did not resolve")
 
 
 def get_json(url: str, headers: dict[str, str], params: dict | None = None):

@@ -207,10 +207,12 @@ def gmail_initiations(gap_days: int) -> list[dict]:
 def collect(gap_days: int = DEFAULT_GAP_DAYS) -> dict:
     events: list[dict] = []
     problems: list[str] = []
+    ok: list[str] = []
 
     for name, fn in (("imessage", imessage_initiations), ("gmail", gmail_initiations)):
         try:
             events.extend(fn(gap_days))
+            ok.append(name)
         except Exception as e:  # noqa: BLE001 - a dead source must degrade visibly
             problems.append(f"{name} unreachable ({type(e).__name__})")
 
@@ -218,7 +220,8 @@ def collect(gap_days: int = DEFAULT_GAP_DAYS) -> dict:
     if len(problems) == 2:
         return {
             "written_at": datetime.now().astimezone().isoformat(),
-            "metrics": {"outreach": {"value": None, "note": "; ".join(problems)}},
+            "metrics": {"outreach": {"value": None, "note": "; ".join(problems),
+                                     "sources_ok": []}},
         }
 
     today = date.today()
@@ -234,15 +237,45 @@ def collect(gap_days: int = DEFAULT_GAP_DAYS) -> dict:
                 "days": [by_day.get(str(d), 0) > 0 for d in window],
                 "detail": sorted(events, key=lambda e: e["date"]),
                 "gap_days": gap_days,
+                "sources_ok": ok,
             }
         },
     }
+
+
+def keeps_prior(new: dict, prior_path: Path) -> bool:
+    """Would writing this REPLACE a better number with a worse one?
+
+    ⚠️ Found the hard way 2026-08-13. The launchd refresh runs in a context with
+    no Full Disk Access, so chat.db raises OperationalError there while the same
+    code from a terminal reads it fine. The job cheerfully wrote outreach=4
+    (email only) over the true 11, every two hours, and the dashboard would have
+    quietly reported a third of the real number forever.
+
+    A run that saw FEWER sources than the last one is not new information, it is
+    a partial outage. Keep what we had and let the age marker tell the story.
+    """
+    if not prior_path.exists():
+        return False
+    try:
+        prior = json.loads(prior_path.read_text()).get("metrics", {}).get("outreach") or {}
+    except (json.JSONDecodeError, OSError):
+        return False
+    if prior.get("value") is None:
+        return False
+    return len(new.get("sources_ok") or []) < len(prior.get("sources_ok") or [])
 
 
 def main() -> int:
     gap = int(os.environ.get("HABITS_OUTREACH_GAP_DAYS", DEFAULT_GAP_DAYS))
     STATE.parent.mkdir(parents=True, exist_ok=True)
     blob = collect(gap)
+
+    if keeps_prior(blob["metrics"]["outreach"], STATE):
+        lost = blob["metrics"]["outreach"].get("note") or "a source"
+        print(f"kept prior {STATE} — this run was degraded ({lost})")
+        return 0
+
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(blob, indent=2))
     tmp.replace(STATE)
