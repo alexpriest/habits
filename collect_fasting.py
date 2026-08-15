@@ -31,15 +31,26 @@ file rather than a TestFlight build.
 
 WRITER PRECEDENCE — highest wins for a given date
 -------------------------------------------------
-    manual       Alex typed it at a terminal (`habits fast yes`). A human
-                 explicitly overriding a derived number is the last word.
+    manual       `habits fast yes|no` for ONE day. Alex looking at a single date
+                 and stating it. A human explicitly overriding a derived number
+                 is the last word.
     app          session-derived, ground truth going forward
     zero-export  historical backfill only (`import_zero.py`)
-    sunday-text  the weekly check-in, for days nothing else covers
+    sunday-text  `habits fast --week mon,tue,fri` — a whole week answered from
+                 memory, for days nothing else covers
 
 This is a change: the loader used to be plain last-write-wins by line order, and
 a Sunday text answer arriving after a session would silently bury it. An unknown
 source ranks below all four rather than above them.
+
+⚠️ **`--week` defaults to `sunday-text`, not `manual`, and that is the point.**
+`sunday_text.py` only asks the question — it has no writer of its own, so the
+answer comes back by text and gets typed in through `habits fast --week`. When
+that defaulted to `manual` it ranked ABOVE `app`, which meant the one route a
+weekly answer actually takes was the one route the precedence did not protect
+against. A week recalled from memory is the weakest evidence here and now ranks
+like it. A single-day verdict stays `manual`: that is him looking at one date
+deliberately, which is the strongest.
 
 THE DATALESS-FILE TRAP
 ----------------------
@@ -387,6 +398,19 @@ def parse_week(spec: str, today: date | None = None) -> dict[date, bool]:
     }
 
 
+def source_for(week: str | None, explicit: str | None) -> str:
+    """Which writer a `habits fast` invocation counts as.
+
+    A whole week recalled from memory is the weakest evidence in the log, and it
+    is exactly what the Sunday text asks for — so `--week` is `sunday-text` and
+    ranks below the app. One day stated deliberately is the strongest, so a bare
+    verdict is `manual` and ranks above it.
+    """
+    if explicit:
+        return explicit
+    return "sunday-text" if week else "manual"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Eating-window collector and logger.")
     sub = ap.add_subparsers(dest="cmd")
@@ -395,7 +419,11 @@ def main() -> int:
     rec.add_argument("verdict", nargs="?", choices=["yes", "no"], help="for a single day")
     rec.add_argument("--date", help="YYYY-MM-DD (default today)")
     rec.add_argument("--week", help="days held this week, e.g. 'mon,tue,fri' | all | none")
-    rec.add_argument("--source", default="manual")
+    rec.add_argument(
+        "--source",
+        default=None,
+        help="default: 'sunday-text' for --week, 'manual' for a single day",
+    )
 
     sub.add_parser("show", help="print the current window")
     args = ap.parse_args()
@@ -408,7 +436,7 @@ def main() -> int:
             days = {d: args.verdict == "yes"}
         else:
             ap.error("give a verdict (yes/no) or --week")
-        for r in record(days, args.source):
+        for r in record(days, source_for(args.week, args.source)):
             print(f"  {r['date']}  {'held' if r['held'] else 'broke'}")
 
     return run()

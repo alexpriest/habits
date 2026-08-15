@@ -403,5 +403,34 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue((d / "fasts-copy.jsonl").exists())
 
 
+class DefaultSourceOnTheCLI(unittest.TestCase):
+    """`sunday_text.py` has no writer of its own — it asks, and the answer gets
+    typed in through `habits fast`. So the CLI's default source IS the weekly
+    check-in's precedence, and getting it wrong reopens the exact hole the
+    precedence table exists to close."""
+
+    def test_a_week_answered_from_memory_defaults_to_sunday_text(self):
+        self.assertEqual(cf.source_for(week="mon,tue", explicit=None), "sunday-text")
+
+    def test_a_single_day_stated_deliberately_defaults_to_manual(self):
+        self.assertEqual(cf.source_for(week=None, explicit=None), "manual")
+
+    def test_an_explicit_source_still_wins(self):
+        self.assertEqual(cf.source_for(week="mon", explicit="manual"), "manual")
+
+    def test_the_weekly_default_ranks_below_the_app(self):
+        # The whole point: a week recalled from memory must not bury a session.
+        self.assertLess(
+            cf.PRECEDENCE[cf.source_for(week="mon,tue", explicit=None)],
+            cf.PRECEDENCE["app"],
+        )
+
+    def test_the_single_day_default_ranks_above_the_app(self):
+        self.assertGreater(
+            cf.PRECEDENCE[cf.source_for(week=None, explicit=None)],
+            cf.PRECEDENCE["app"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
