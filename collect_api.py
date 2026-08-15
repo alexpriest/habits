@@ -9,7 +9,7 @@ command line, so a secret cannot end up in shell history or a process listing.
     lifts   Hevy REST          op://Claude/Hevy API/credential
     rides   strava-mcp on Railway, over MCP Streamable HTTP
                                op://Claude/Strava MCP/{credential,url}
-    sleep   Oura REST          op://Claude/Oura API/credential  (personal access token)
+    sleep   Oura REST          op://Claude/Oura MCP/credential  (personal access token)
 
 Rides go through Alex's own deployed MCP server rather than the Strava API
 directly, because the Strava refresh token lives on that server's Railway volume
@@ -172,7 +172,10 @@ def hevy_lifts(today: date) -> dict:
 
 
 def oura_sleep(today: date) -> dict:
-    token = secret("HABITS_OURA_TOKEN", "op://Claude/Oura API/credential")
+    # The 1Password item is "Oura MCP", not "Oura API" — the latter never existed,
+    # so this read failed silently for as long as the collector has run (verified
+    # 2026-08-14: `op item list --vault Claude` has exactly one Oura entry).
+    token = secret("HABITS_OURA_TOKEN", "op://Claude/Oura MCP/credential")
     start = today - timedelta(days=HISTORY_DAYS)
     periods = get_json(
         "https://api.ouraring.com/v2/usercollection/sleep",
