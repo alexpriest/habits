@@ -33,6 +33,7 @@ you stop opening.
 | journal | Craft daily notes (mirror) | < 4 days this week |
 | writing | `Site/Writing` published (content vault) | nothing in > 30 days |
 | outreach | Gmail sent + iMessage | < 3 *initiated* this week |
+| fasting | Window sessions via iCloud | < 4 of the 5 weekdays held |
 
 Reading is deliberately *not* tracked — it's a question the Sunday text asks, and
 the answer gets logged. Spending was cut.
@@ -46,7 +47,14 @@ thread's *first sender* must be Alex, because `in:sent` labels an entire thread
 if any one message in it was sent, so replying to a marketing blast otherwise
 drags that blast in under its own subject.
 
-Fasting was built and then parked the same day — see `parked/README.md`.
+**Fasting reads from Window** (`~/Code/projects/window`), Alex's own iOS tracker.
+It was parked 2026-08-13 because capture was the problem — Zero has no API,
+HealthKit has no fasting type, and macOS has no Health app — and un-parked
+2026-08-15 when he approved building the app. Window writes one line per
+completed fast to its iCloud container; `collect_fasting.py` turns those into
+one verdict per day. **The app records facts and this repo makes the judgment**,
+so the 18h threshold and the Mon–Fri denominator stay in a file he can edit
+rather than in a TestFlight build.
 
 ## Layout
 
@@ -56,7 +64,9 @@ collect_local.py     vault-backed: journal, writing
 collect_api.py       Hevy, Oura, Strava
 collect_outreach.py  iMessage + Gmail, conversations started
 mcp_client.py        minimal MCP Streamable-HTTP client (rides)
-parked/              built, not wired — see parked/README.md
+collect_fasting.py   Window sessions (iCloud) -> one verdict per day
+import_zero.py       one-off backfill from a Zero "Download My Data" export
+tests/               unittest; python3 -m unittest discover -s tests -t .
 sunday_text.py       the weekly accountability text
 install.sh           symlink, config, launchd — per machine
 ```
@@ -117,6 +127,7 @@ printed rather than buried.
 - ✅ Local collectors: journal (+ 8-week history), writing
 - ✅ Outreach collector (iMessage + Gmail), conversations started
 - ✅ Fasting row, eating-window log, Zero export importer
+- ⬜ Fasting shows `—` until Window is on his phone (needs TestFlight)
 - ✅ SwiftBar menu bar reader
 - ✅ `habits refresh` / `habits journal` / `habits fast`
 - ✅ install.sh + launchd refresh (Mini, every 2h)

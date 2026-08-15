@@ -45,7 +45,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from collect_fasting import WEEKDAYS, record, write_state  # noqa: E402
+from collect_fasting import WEEKDAYS, record, run  # noqa: E402
 
 START_KEYS = ("start", "startdate", "start_date", "starttime", "start_time", "began", "begin")
 END_KEYS = ("end", "enddate", "end_date", "endtime", "end_time", "ended", "finish")
@@ -266,7 +266,9 @@ def main() -> int:
         return 0
 
     record(days, source="zero-export")
-    write_state()
+    # `run` re-reads the log through the precedence rules, so a backfilled day
+    # cannot displace a session the app already recorded for it.
+    run(quiet=True)
     print(f"  wrote {len(days)} records to the eating-window log")
     return 0
 

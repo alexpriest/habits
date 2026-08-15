@@ -34,7 +34,7 @@ STATE_DIR = Path.home() / "Code" / "tools" / "habits" / "state"
 # One file per WRITER, never per metric — two processes sharing a file is the
 # read-modify-write race that silently ate 53 of 60 concurrent vault writes.
 # Adding a collector means adding its name here.
-SOURCES = ("local", "api", "outreach")
+SOURCES = ("local", "api", "outreach", "fasting")
 
 # Every metric: label, direction, threshold, unit renderer.
 # direction "min" -> off track when value < threshold
@@ -47,6 +47,9 @@ DEFAULTS: dict = {
         "journal": {"label": "journal", "direction": "min", "threshold": 4, "unit": "days7"},
         "writing": {"label": "writing", "direction": "max", "threshold": 30, "unit": "daysago"},
         "outreach": {"label": "outreach", "direction": "min", "threshold": 3, "unit": "count"},
+        # Mon–Fri only, so the denominator is 5 and a weekend cell is unknown,
+        # never a miss. Derived from Window sessions by collect_fasting.py.
+        "fasting": {"label": "fasting", "direction": "min", "threshold": 4, "unit": "weekdays"},
     },
     "surge_multiplier": 1.5,
     "stale_after_hours": 26,
