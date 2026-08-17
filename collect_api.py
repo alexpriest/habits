@@ -64,8 +64,13 @@ class SourceError(RuntimeError):
 # ------------------------------------------------------------- credentials
 
 
-def secret(env_var: str, op_ref: str) -> str:
-    """env -> op -> op inside an interactive zsh.
+def secret(env_var: str, *op_refs: str) -> str:
+    """env -> op -> op inside an interactive zsh, over each ref in order.
+
+    Multiple refs exist for the Oura case: the PAT and the MCP OAuth passcode are
+    two different credentials living in the same 1Password item, so the collector
+    has to prefer the `pat` field and fall back to `credential`. A single ref meant
+    ANT-470 could tell Alex to add a `pat` field that nothing would ever read.
 
     ⚠️ The third hop is not paranoia, it is the launchd case. OP_SERVICE_ACCOUNT_TOKEN
     is defined in ~/.zshrc, and .zshrc is read ONLY by interactive shells — not by
@@ -83,18 +88,20 @@ def secret(env_var: str, op_ref: str) -> str:
     if val:
         return val.strip()
 
-    attempts = (
-        ["op", "read", op_ref],
-        ["/bin/zsh", "-ic", f"op read {op_ref!r}"],
-    )
-    for argv in attempts:
-        try:
-            proc = subprocess.run(argv, capture_output=True, text=True, timeout=12)
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if proc.returncode == 0 and proc.stdout.strip():
-            return proc.stdout.strip()
-    raise SourceError(f"{env_var} unset and `op read {op_ref}` did not resolve")
+    for op_ref in op_refs:
+        attempts = (
+            ["op", "read", op_ref],
+            ["/bin/zsh", "-ic", f"op read {op_ref!r}"],
+        )
+        for argv in attempts:
+            try:
+                proc = subprocess.run(argv, capture_output=True, text=True, timeout=12)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc.stdout.strip()
+    tried = " / ".join(f"`op read {r}`" for r in op_refs)
+    raise SourceError(f"{env_var} unset and {tried} did not resolve")
 
 
 def get_json(url: str, headers: dict[str, str], params: dict | None = None):
@@ -175,7 +182,17 @@ def oura_sleep(today: date) -> dict:
     # The 1Password item is "Oura MCP", not "Oura API" — the latter never existed,
     # so this read failed silently for as long as the collector has run (verified
     # 2026-08-14: `op item list --vault Claude` has exactly one Oura entry).
-    token = secret("HABITS_OURA_TOKEN", "op://Claude/Oura MCP/credential")
+    #
+    # ⚠️ `pat` FIRST, `credential` second, and the order is the whole point. That
+    # item's `credential` is an MCP OAuth passcode, which 401s against the REST API
+    # (retested 2026-08-17: "expired, revoked, malformed, or invalid"). ANT-470 asks
+    # Alex to mint a real personal access token into a NEW `pat` field, so `pat` is
+    # the one that will work and it has to win.
+    token = secret(
+        "HABITS_OURA_TOKEN",
+        "op://Claude/Oura MCP/pat",
+        "op://Claude/Oura MCP/credential",
+    )
     start = today - timedelta(days=HISTORY_DAYS)
     periods = get_json(
         "https://api.ouraring.com/v2/usercollection/sleep",
