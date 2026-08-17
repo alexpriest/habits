@@ -157,24 +157,26 @@ line, so no secret lands in shell history or a process list.
 |---|---|---|
 | `op://Claude/Hevy API/credential` | ✅ live | hevy.com/settings?developer |
 | `op://Claude/Strava MCP/*` | ✅ live | the refresh token stays on the Railway volume; nothing here expires |
-| `op://Claude/<item-id>/pat` | ✅ live | cloud.ouraring.com/personal-access-tokens — **a PAT, not the MCP OAuth passcode** |
+| `op://Claude/Oura MCP/pat` | ✅ live | cloud.ouraring.com/personal-access-tokens — **a PAT, not the MCP OAuth passcode** |
 
-🚨 **TWO items in the Claude vault are both titled `Oura MCP`, so every by-title
-`op read` against that name fails.** Not "picks the wrong one" — `op` refuses:
-`could not get item Claude/Oura MCP: More than one item matches "Oura MCP"`. The
-older item (`522anp…`, 2026-08-13) holds the dead `credential` / MCP OAuth
-passcode; the newer one (`kjib67…`, 2026-08-17) holds the working `pat`. That is
-why `oura_sleep()` carries a **by-item-ID** ref in the middle of its list — it is
-the only one that resolves today.
+⚠️ **`pat` and `credential` live in the same item and are not interchangeable.**
+`credential` is an MCP OAuth passcode for the Railway MCP server; against
+`api.ouraring.com` it 401s. Only `pat` works for this collector.
 
-The list is ordered so it survives a cleanup: if the two items are ever merged
-into one, the by-title `pat` ref starts winning and the ID ref becomes dead
-weight. Nothing in the code needs to change when that happens.
+📌 **"Sleep is stale" was three different faults in a row, and the third is the
+one to remember.** (1) The collector read a nonexistent `Oura API` item — fixed in
+`17a864c`. (2) The item it then read holds an OAuth passcode, not a PAT — needed a
+token Alex had to mint. (3) He minted it into a **second item with the identical
+title**, and `op read` refuses an ambiguous title outright rather than picking one:
 
-📌 There is no `Oura API` item and there never was — that reference (fixed in
-17a864c) was the *first* of the three faults here. The second was that
-`credential` holds an OAuth passcode, not a PAT. The third was this title
-collision. Each one presented as "sleep is stale."
+```
+could not get item Claude/Oura MCP: More than one item matches "Oura MCP"
+```
+
+That broke *every* by-title ref against that name, including the `credential` one
+that had resolved an hour earlier. The items were merged 2026-08-17, so a by-title
+read works again. **If one ever fails here, check for a duplicate title before
+suspecting the token** — the error looks nothing like the cause.
 
 Rides do not go through a token at all — they go through the deployed
 `strava-mcp-server`, which speaks the **older HTTP+SSE** MCP transport (`/sse` +

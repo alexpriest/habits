@@ -181,23 +181,21 @@ def hevy_lifts(today: date) -> dict:
 def oura_sleep(today: date) -> dict:
     # There is no "Oura API" item and never was; the vault entry is "Oura MCP".
     #
-    # ⚠️ TWO items now share that exact title (2026-08-17: Alex minted the PAT into a
-    # NEW item rather than adding a field to the old one), and `op read` by title
-    # fails outright on ambiguity — "More than one item matches" — rather than
-    # picking one. So a by-title ref resolves NOTHING today, including the legacy
-    # `credential` one that used to work. Hence the middle ref by item ID.
+    # ⚠️ `pat` and `credential` are two DIFFERENT credentials in that one item, and
+    # only `pat` works. `credential` is an MCP OAuth passcode for the Railway MCP
+    # server; against api.ouraring.com it returns 401 "expired, revoked, malformed"
+    # (retested 2026-08-17). It stays in the list only as a diagnostic — if `pat` is
+    # ever removed, falling through to a 401 reads better than "did not resolve".
     #
-    # Order is load-bearing:
-    #   1. by title, `pat`        — the end state IF the two items are ever merged
-    #   2. by item ID, `pat`      — what actually resolves right now
-    #   3. by title, `credential` — legacy; that field is an MCP OAuth passcode and
-    #                               401s against the REST API anyway (retested today)
-    # Each miss costs ~1.3s of `op` error, well inside the 12s timeout, and 1 starts
-    # winning the moment the duplicate title goes away. Nothing to change here then.
+    # 📌 A by-item-ID ref sat between these two for part of 2026-08-17, because the
+    # PAT was minted into a SECOND item also titled "Oura MCP" and `op read` refuses
+    # an ambiguous title outright ("More than one item matches") instead of picking
+    # one — which broke every by-title ref against that name, `credential` included.
+    # The items were merged the same day, so the ID ref is gone. If a by-title read
+    # here ever fails again, check for a duplicate title BEFORE suspecting the token.
     token = secret(
         "HABITS_OURA_TOKEN",
         "op://Claude/Oura MCP/pat",
-        "op://Claude/kjib67gu63e2e55jswdoe74r4a/pat",
         "op://Claude/Oura MCP/credential",
     )
     start = today - timedelta(days=HISTORY_DAYS)
