@@ -75,7 +75,6 @@ class Reading:
     history: list[float] | None = None
     days: list | None = None
     stale_hours: float | None = None
-    provisional: bool = False
     denominator: int = 7
 
     @property
@@ -175,7 +174,6 @@ def build_readings(cfg: dict, state: dict) -> list[Reading]:
                 history=entry.get("history"),
                 days=entry.get("days"),
                 stale_hours=hours_since(entry.get("written_at")),
-                provisional=entry.get("provisional", False),
                 denominator=entry.get("unit_denominator", 5),
             )
         )
@@ -355,8 +353,6 @@ def render(cfg: dict, state: dict, color: bool = True) -> str:
         if r.stale_hours is not None and r.stale_hours > stale_limit:
             age = f"{int(r.stale_hours / 24)}d old" if r.stale_hours >= 48 else "stale"
             note = f"{note}  ({age})" if note else f"({age})"
-        if r.provisional:
-            note = f"{note}  [provisional]" if note else "[provisional]"
 
         # One grammar for every row. `days` if the collector produced it, else
         # derive cells from a continuous series against the threshold (sleep).
@@ -471,11 +467,16 @@ def cmd_refresh() -> int:
 
 
 def cmd_journal() -> int:
-    """The day-by-day the journal row is built from.
+    """The day-by-day the journal row is built from, with a reason per day.
 
-    This row ships `provisional` because agent-written prose in a daily note is
-    not distinguishable from Alex's. Printing the reason per day is what makes
-    that limit auditable instead of merely disclosed.
+    The row used to ship a `[provisional]` tag, because agent-written prose in a
+    daily note is not distinguishable from Alex's by any text heuristic. That was
+    fixed at the source on 2026-08-17 — agents may no longer write prose into a
+    daily note at all (global CLAUDE.md) — so the tag came off.
+
+    This view stayed. A rule enforced by instruction rather than by code needs to
+    be AUDITABLE: if agent prose ever lands in a note again, the reason printed
+    here is where it shows up.
     """
     path = STATE_DIR / "local.json"
     if not path.exists():

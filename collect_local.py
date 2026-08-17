@@ -41,12 +41,22 @@ NOISE = re.compile(
 )
 # Agent-written prose signatures. Agents lean on Obsidian callouts and on
 # bold-lead paragraphs; Alex almost never does either in a daily note.
-# ⚠️ KNOWN LIMIT: this does not catch plain agent prose. Verified 2026-08-11 on
-# the 8/06 note (an agent-written wagyu cooking guide), which still scores as
-# journaled. A machine writes good paragraphs, and no text heuristic separates
-# them from Alex's. The metric is a WEEKLY COUNT against a threshold of 4, so a
-# one-day false positive rarely flips the verdict — but it ships `provisional`
-# and `habits journal` prints the day-by-day so a wrong day is visible.
+#
+# 📌 These heuristics used to be the ONLY defence, and they leaked: no text test
+# separates plain agent prose from Alex's, and the 2026-08-06 note (an agent's
+# wagyu cooking guide) scored as him journaling. That is why the row shipped
+# `provisional` from 2026-08-11 to 2026-08-17.
+#
+# ✅ FIXED AT THE SOURCE 2026-08-17, by Alex's ruling: **no agent prose goes in a
+# daily note, ever — only tasks or a link to a separate page.** It is now in the
+# global CLAUDE.md, so it binds every agent in every directory. A measurement of
+# Alex's own behaviour cannot be made trustworthy by better parsing of the
+# machine's output; it is made trustworthy by the machine not writing there.
+#
+# These patterns stay as a backstop and `habits journal` still prints a reason per
+# day, so a violation is visible rather than silent. ⚠️ Notes written BEFORE
+# 2026-08-17 predate the rule and may still contain agent prose — the rolling
+# 7-day window clears them by 2026-08-24.
 CALLOUT = re.compile(r"^\s*>")
 BOLD_LEAD = re.compile(r"^\s*\*\*[^*]+\*\*")
 MIN_PROSE_CHARS = 80
@@ -224,7 +234,6 @@ def collect() -> dict:
         "journal": {
             "value": hit,
             "note": "",
-            "provisional": True,
             "days": [ok for _, ok, _ in rows],
             "detail": [{"date": str(d), "journaled": ok, "why": why} for d, ok, why in rows],
         }

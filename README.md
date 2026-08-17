@@ -11,7 +11,7 @@ exhaust, ticking a box for it is input tax that produces no new information.
   ● lifts      2       ≥1     ■ □ □ ■ □ □ □
   ● sleep      6h58    ≥6h    ■ ■ ■ □ ■ ■ ■   5.6–7.8h
   ● rides      3       ≥3     □ ■ ■ □ ■ □ □   ≥30min, no e-bike
-  ● journal    7/7     ≥4     ■ ■ ■ ■ ■ ■ ■   [provisional]
+  ● journal    7/7     ≥4     ■ ■ ■ ■ ■ ■ ■
   ● writing    0d      ≤30d   □ □ □ □ □ □ ■   last: "Fuck it, let's go", Aug 17
   ● outreach   10      ≥3     ■ ■ ■ ■ □ □ □
   — fasting    —       ≥4     · · · · · · ·   not answered yet
@@ -145,14 +145,28 @@ used.
 
 ## Known limits
 
-**Journaling is `provisional`.** The rule is Alex's: a Craft daily note with
-paragraph prose (not just tasks) *or* a voice memo. Calendar blocks, tasks,
-bullets, agent callouts and bold-lead paragraphs are excluded — but plain
-agent-written prose is not distinguishable from Alex's by any text heuristic, and
-the 2026-08-06 note (an agent's wagyu cooking guide) still scores as journaled.
-It survives because the metric is a weekly count against a threshold of 4, where
-one false positive rarely flips the verdict, and because the day-by-day is
-printed rather than buried.
+**Journaling was `provisional`, and now isn't — because the hole got closed at
+the source.** The rule is Alex's: a Craft daily note with paragraph prose (not
+just tasks) *or* a voice memo. Calendar blocks, tasks, bullets, agent callouts and
+bold-lead paragraphs are excluded, and anything below the `---` divider is ignored
+outright.
+
+None of that could catch plain agent prose above the divider — a machine writes
+good paragraphs, and no text heuristic separates them from Alex's. The 2026-08-06
+note (an agent's wagyu cooking guide) scored as him journaling. So the row shipped
+a `[provisional]` tag from 2026-08-11.
+
+Fixed 2026-08-17 by ruling rather than by parsing: **no agent prose goes in a
+daily note, ever — only tasks, or a link to a separate page.** It lives in the
+global `CLAUDE.md`, so it binds every agent in every directory. A measurement of
+Alex's own behaviour cannot be made trustworthy by better parsing of the machine's
+output; it is made trustworthy by the machine not writing there. The tag came off.
+
+⚠️ Two things this leaves open. Notes written **before 2026-08-17** predate the
+rule and may still contain agent prose; the rolling 7-day window clears them by
+**2026-08-24**. And the rule is enforced by instruction, not by code — which is
+why `habits journal` still prints a reason per day. That view is the audit, and it
+is the reason a violation would be visible rather than silent.
 
 ## Status
 
