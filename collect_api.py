@@ -199,10 +199,23 @@ def oura_sleep(today: date) -> dict:
         "op://Claude/Oura MCP/credential",
     )
     start = today - timedelta(days=HISTORY_DAYS)
+    # ⚠️ Oura's `end_date` is EXCLUSIVE, so this has to ask for TOMORROW to get
+    # last night. Verified 2026-08-17 against the live API: end_date=2026-08-17
+    # returns nights through the 16th, end_date=2026-08-18 returns the 17th too.
+    #
+    # Passing `today` cost the most recent night on EVERY run since this collector
+    # was written — so the newest sparkline cell was permanently blank, the note
+    # permanently read "6/7 nights" (never 7/7, which should have been the tell),
+    # and the 7-day average was always computed without his latest night. It looked
+    # exactly like a ring that hadn't synced, which is why it survived this long.
+    #
+    # Also worth knowing when reading these numbers: Oura keys a night by its WAKE
+    # date, not its bedtime. `day=2026-08-15` is the sleep that ran 08-14 23:18 ->
+    # 08-15 07:59. So the rightmost cell is last night, never "tonight."
     periods = get_json(
         "https://api.ouraring.com/v2/usercollection/sleep",
         {"Authorization": f"Bearer {token}"},
-        {"start_date": str(start), "end_date": str(today)},
+        {"start_date": str(start), "end_date": str(today + timedelta(days=1))},
     )
     by_day: dict[date, int] = {}
     for p in periods.get("data") or []:
