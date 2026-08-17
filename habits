@@ -183,10 +183,21 @@ def build_readings(cfg: dict, state: dict) -> list[Reading]:
 
 
 # The 7-day strip: one cell per day of the rolling window, oldest on the left.
+#
 # NOT ●/○ — those are the status marks at the start of each row, and reusing them
-# made the strip read as six more status dots. █ and ░ are the pair already proven
-# on this terminal by the `left` build.
-STRIP_HIT, STRIP_MISS, STRIP_UNKNOWN = "█", "░", "·"
+# made the strip read as six more status dots.
+#
+# ⚠️ NOT █/░ either, which is what shipped first. Both are FULL-CELL blocks: they
+# paint the whole character cell including its leading, so a filled cell sits flush
+# against the filled cell in the row above and the seven rows fuse into one solid
+# vertical bar. Alex, 2026-08-17: "the bars run into each other vertically which is
+# annoying." ■/□ are glyphs drawn INSIDE the cell with their own padding, so the
+# rows stay visually separate with no change to line height.
+#
+# This is the 2026-08-11 sparkline slab bug rotated 90°, and it survived because
+# `--glyph-test` printed ONE row per candidate and only ever checked horizontal
+# alignment. It stacks rows now.
+STRIP_HIT, STRIP_MISS, STRIP_UNKNOWN = "■", "□", "·"
 STRIP_WIDTH = 7
 
 # Column widths for a data row, so the weekday header can align to the same grid
@@ -382,17 +393,21 @@ def read_left() -> str:
     return out.stdout.strip()
 
 
-# Every row MUST be exactly 8 characters — the point of the test is column
-# alignment, and a short row proves nothing. (Shipped 4-char rows once. Once.)
-GLYPH_CANDIDATES = [
-    ("eighth blocks — ascending", "▁▂▃▄▅▆▇█"),
-    ("eighth blocks — jagged", "▃▇▂▆▁█▄▅"),
-    ("full/empty (proven in left)", "████░░░░"),
-    ("half blocks", "▄▀▄▀▄▀▄▀"),
-    ("status dots", "●○●○◉◌◉◌"),
-    ("triangles", "▲▼△▽▲▼△▽"),
-    ("arrows", "↑↓→←↑↓→←"),
-    ("shade ramp", "░░▒▒▓▓██"),
+# Candidate hit/miss/unknown triples for the strip.
+#
+# ⚠️ The test below stacks SEVEN ROWS, and that is the whole point. The previous
+# version printed one row per candidate and checked horizontal alignment, so it
+# could not see the defect Alex actually hit: `█` and `░` are full-cell blocks, so
+# a filled cell in one row TOUCHES the filled cell in the row above it and the
+# chart column fuses into a vertical slab. One row can never show that. This is
+# the same lesson as the 2026-08-11 sparkline slab, one axis over.
+GLYPH_SETS = [
+    ("blocks (old — fuses vertically)", "█", "░", "·"),
+    ("squares", "■", "□", "·"),
+    ("medium squares", "◼", "◻", "·"),
+    ("small squares", "▪", "▫", "·"),
+    ("half blocks", "▄", "▁", "·"),
+    ("diamonds", "◆", "◇", "·"),
 ]
 
 
@@ -400,16 +415,29 @@ def glyph_test() -> str:
     """Print candidates so they can be LOOKED AT on the real terminal.
 
     Five iterations of `left` passed every check runnable in a terminal and still
-    rendered wrong on screen. Nothing visual gets called done from a script.
+    rendered wrong on screen. Nothing visual gets called done from a script — so
+    this prints, and a human decides.
     """
-    out = ["", "  Each row must be exactly 8 cells wide and align with the others.", ""]
-    out.append("  " + "12345678")
-    out.append("  " + "-" * 8)
-    for name, glyphs in GLYPH_CANDIDATES:
-        out.append(f"  {glyphs:<8}  {name}")
-    out.append("")
-    out.append("  Look for: gaps, glyphs taller/shorter than the row, or")
-    out.append("  anything that breaks the 8-cell column above.")
+    # A jagged pattern, not a solid block: an all-hit grid hides nothing and a
+    # checkerboard hides vertical fusing. This mixes runs of both.
+    rows = [
+        [1, 0, 0, 1, 0, 0, 0],
+        [1, 1, 1, 0, 1, 1, 1],
+        [0, 1, 1, 0, 1, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1],
+        [0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 0, 0, 0],
+        [2, 2, 2, 2, 2, 2, 2],
+    ]
+    out = ["", "  Look DOWN the columns, not across. Do the filled cells in", 
+           "  consecutive rows touch and form a solid bar?", ""]
+    for name, hit, miss, unknown in GLYPH_SETS:
+        marks = {1: hit, 0: miss, 2: unknown}
+        out.append(f"  {name}")
+        for row in rows:
+            out.append("      " + " ".join(marks[v] for v in row))
+        out.append("")
+    out.append("  Also check: every row the same width, no cell wider than the rest.")
     out.append("")
     return "\n".join(out)
 
