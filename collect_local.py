@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Local collectors for `habits` — the metrics computable from disk, no API keys.
 
-Writes ~/.local/state/habits/local.json. One file per writer: the MCP-backed
-metrics land in mcp.json, so two refreshes can never clobber each other.
+Writes state/local.json. One file per writer — api.json, outreach.json and
+fasting.json have their own collectors — so two refreshes can never clobber
+each other.
 
 Journaling, per Alex (2026-08-11):
     "craft daily note with paragraph text (not just tasks) OR voice memo = journal"

@@ -72,11 +72,18 @@ install.sh           symlink, config, launchd — per machine
 ```
 
 - Config: `~/.config/habits/config.json` (thresholds; falls back to `DEFAULTS`)
-- State: `~/.local/state/habits/{local,mcp}.json`
+- State: `~/Code/tools/habits/state/{local,api,outreach,fasting}.json`
+- Logs: `~/.local/state/habits/com.alexpriest.habits-*.log` (launchd stdout/stderr)
 
-**One state file per writer.** Local collectors write `local.json`; the
-MCP-backed metrics land in `mcp.json`. Two writers on one file would clobber —
-the same failure that silently ate 53 of 60 concurrent vault writes.
+State lives **in the repo**, not under `~/.local/state`, because `~/Code` is what
+Syncthing carries between the two Macs — so the MacBook renders the same numbers
+without running a collector. That is also why only the Mini owns the refresh
+timer: two machines collecting into one synced file would be two writers racing.
+
+**One state file per writer.** `collect_local.py` → `local.json`, `collect_api.py`
+→ `api.json`, `collect_outreach.py` → `outreach.json`, `collect_fasting.py` →
+`fasting.json`. Two writers on one file would clobber — the same failure that
+silently ate 53 of 60 concurrent vault writes.
 
 ## Rules this thing was built around
 
@@ -130,22 +137,36 @@ printed rather than buried.
 - ⬜ Fasting shows `—` until Window is on his phone (needs TestFlight)
 - ✅ SwiftBar menu bar reader
 - ✅ `habits refresh` / `habits journal` / `habits fast`
-- ✅ install.sh + launchd refresh (Mini, every 2h)
-- ✅ Weekly text written and dry-run clean — **plist NOT loaded**, run
-      `./install.sh --with-text` to schedule it
-- ⬜ Hevy / Oura / Strava need credentials in 1Password before they self-refresh.
-      Until then the seeded values age visibly. See *Credentials* below.
+- ✅ install.sh + launchd refresh (Mini, every 2h + at load)
+- ✅ Hevy and Strava self-refresh from 1Password (live since 2026-08-13)
+- 🔴 **Oura sleep is broken** — the token in `op://Claude/Oura MCP/credential` is an
+      MCP OAuth credential, not a personal access token, and now returns HTTP 401
+      outright. The sleep row ages visibly and correctly. Needs a PAT minted by
+      Alex; tracked in ANT-470. See *Credentials* below.
+- 🔴 **The weekly text has never delivered.** The plist IS loaded (`--with-text`
+      was run 2026-08-13), and its first scheduled run — Sun 2026-08-16 21:00 —
+      died with `subprocess.TimeoutExpired` after 60s on `imsg send`. Nothing
+      reached Alex's thread (verified against `chat.db`; last message there is
+      2026-08-14). Tracked in ANT-486.
+- ⬜ Fasting shows `—` until Window is on his phone (needs TestFlight, ANT-472)
 
 ## Credentials
 
 `collect_api.py` reads env first, then 1Password. Nothing is passed on a command
 line, so no secret lands in shell history or a process list.
 
-| Item | Where to get it |
-|---|---|
-| `op://Claude/Hevy API/credential` | hevy.com/settings?developer |
-| `op://Claude/Oura API/credential` | cloud.ouraring.com/personal-access-tokens |
-| `op://Claude/Strava API/client_id`, `client_secret`, `refresh_token` | already set on the Railway deploy of `strava-mcp-server` |
+| Item | State | Where to get it |
+|---|---|---|
+| `op://Claude/Hevy API/credential` | ✅ live | hevy.com/settings?developer |
+| `op://Claude/Strava MCP/*` | ✅ live | the refresh token stays on the Railway volume; nothing here expires |
+| `op://Claude/Oura MCP/credential` | 🔴 401 | cloud.ouraring.com/personal-access-tokens — **a PAT, not the MCP OAuth passcode** |
 
-The Strava trio already exists — it is in Railway's env for the MCP server, and
-`railway login` (browser) is the only thing standing between here and there.
+⚠️ **There is no `Oura API` item and there never was** — the vault has exactly one
+Oura entry, `Oura MCP`, and what it holds is an OAuth credential for the MCP
+server. Pointing the collector at it (commit 17a864c) fixed the *lookup*; the
+token itself still 401s against `api.ouraring.com`. The two are different
+credentials and only a personal access token works here.
+
+Rides do not go through a token at all — they go through the deployed
+`strava-mcp-server`, which speaks the **older HTTP+SSE** MCP transport (`/sse` +
+`/message`; `/mcp` 404s). `mcp_client.py` exists for exactly that.
