@@ -29,6 +29,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -275,6 +276,30 @@ def collect(gap_days: int = DEFAULT_GAP_DAYS) -> dict:
 
     today = date.today()
     window = [today - timedelta(days=i) for i in range(WINDOW_DAYS - 1, -1, -1)]
+
+    # ⚠️ CLIP TO THE WINDOW BEFORE COUNTING. Both sources reach back 7×24h from
+    # NOW — iMessage via `time.time() - WINDOW_DAYS * 86400`, Gmail via
+    # `newer_than:7d` — which spills into an 8th calendar day. `days` was already
+    # built from the correct 7 dates, so the strip and the number disagreed by
+    # construction: on 2026-08-17 the value read 11 while the strip could only
+    # ever account for 10, the extra being an Aug 10 email.
+    #
+    # Clipping here rather than tightening each source keeps ONE definition of the
+    # window, shared with the renderer's header. Two definitions is what produced
+    # the bug.
+    in_window = {str(d) for d in window}
+    dropped = [e for e in events if e["date"] not in in_window]
+    events = [e for e in events if e["date"] in in_window]
+    if dropped:
+        # stderr, NOT the dashboard note. `problems` means a source failed, and
+        # trimming to the stated window is correct behaviour — surfacing it on the
+        # row would read as an error next to a number that is finally right.
+        print(
+            f"  clipped {len(dropped)} outside {window[0]}..{window[-1]}: "
+            + ", ".join(f"{e['date']} {e['who'][:32]}" for e in dropped),
+            file=sys.stderr,
+        )
+
     by_day = collections.Counter(e["date"] for e in events)
 
     return {

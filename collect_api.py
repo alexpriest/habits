@@ -233,10 +233,19 @@ def oura_sleep(today: date) -> dict:
         raise SourceError("no sleep periods in the window")
 
     series = [by_day.get(d) for d in window_days(today, HISTORY_DAYS)]
+
+    # The dashboard draws sleep as 7 hit/miss cells against the ≥6h bar, which is
+    # readable but drops magnitude. The range puts it back in one cheap string —
+    # a number nobody has to decode a scale to read. This is the replacement for
+    # the range-scaled sparkline: the information stayed, the guessing went.
+    lo, hi = min(known) / 3600, max(known) / 3600
+    span = f"{lo:.1f}–{hi:.1f}h"
+    missing = "" if len(known) == WINDOW_DAYS else f"{len(known)}/{WINDOW_DAYS} nights, "
+
     return {
         "value": round(sum(known) / len(known) / 3600, 2),
         "history": [None if v is None else round(v / 3600, 2) for v in series],
-        "note": "" if len(known) == WINDOW_DAYS else f"{len(known)}/{WINDOW_DAYS} nights",
+        "note": f"{missing}{span}",
     }
 
 

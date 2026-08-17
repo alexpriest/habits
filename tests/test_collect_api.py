@@ -77,13 +77,15 @@ class OuraDateWindow(unittest.TestCase):
         """`note` is the tell. A permanent '6/7 nights' means a permanent off-by-one."""
         window = [self.TODAY - timedelta(days=i) for i in range(collect_api.WINDOW_DAYS)]
         got, _ = self.call([sleep_period(d, 7.0) for d in window])
-        self.assertEqual(got["note"], "", f"expected a clean 7/7, got {got['note']!r}")
+        # The note also carries the range now, so assert the ABSENCE of a
+        # missing-nights clause rather than an empty string.
+        self.assertNotIn("nights", got["note"], f"expected a clean 7/7, got {got['note']!r}")
 
     def test_a_genuinely_missing_night_still_reports_it(self):
         """The fix must not paper over a real gap — that was the original symptom."""
         window = [self.TODAY - timedelta(days=i) for i in range(collect_api.WINDOW_DAYS)]
         got, _ = self.call([sleep_period(d, 7.0) for d in window[1:]])  # today absent
-        self.assertEqual(got["note"], "6/7 nights")
+        self.assertIn("6/7 nights", got["note"])
         self.assertIsNone(got["history"][-1])
 
 

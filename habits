@@ -182,17 +182,82 @@ def build_readings(cfg: dict, state: dict) -> list[Reading]:
     return readings
 
 
-SPARK = "▁▂▃▄▅▆▇█"
-SPARK_WIDTH = 14  # rolling-7 sampled once per day — a smooth trend, not 8 steps
-
 # The 7-day strip: one cell per day of the rolling window, oldest on the left.
 # NOT ●/○ — those are the status marks at the start of each row, and reusing them
 # made the strip read as six more status dots. █ and ░ are the pair already proven
 # on this terminal by the `left` build.
 STRIP_HIT, STRIP_MISS, STRIP_UNKNOWN = "█", "░", "·"
+STRIP_WIDTH = 7
+
+# Column widths for a data row, so the weekday header can align to the same grid
+# without anyone counting spaces by hand.
+LABEL_W, VALUE_W, THRESH_W = 11, 8, 7
+#                  "  " + mark + " "
+ROW_PREFIX_WIDTH = 2 + 1 + 1 + LABEL_W + VALUE_W + THRESH_W
+
+# 📌 Sparklines were REMOVED 2026-08-17 on Alex's call, and the reasoning is worth
+# keeping because it was not "they looked bad."
+#
+# They rendered 13 cells in a column headed "LAST 7 DAYS", with nothing saying so
+# — two different time spans in one column, unlabelled. Then the scale ran from
+# his worst night in the window rather than from zero (a deliberate fix for an
+# earlier solid-black-slab bug), so the shape could not be read at all without
+# knowing the range, and nothing printed the range. His verdict: "I don't really
+# know what I'm looking at."
+#
+# Every row is now the same 7 days as the header, in one grammar, with a weekday
+# label row above it. Magnitude that a binary cell loses moves into the note
+# (sleep prints its range) — text is cheap and unambiguous, which a 13-cell
+# range-scaled sparkline was not. `history` is still collected and still drives
+# `surging`; it simply is not drawn any more.
 
 
-def strip(days: list | None, width: int = 7) -> str:
+def day_labels(today: date, width: int = STRIP_WIDTH) -> str:
+    """One weekday initial per strip cell, aligned to the same grid.
+
+    The window is ROLLING, so these rotate — today is always the rightmost cell.
+    That is the whole reason the row is generated rather than hardcoded to
+    `M T W T F S S`: on a Monday the window reads T W T F S S M, and a fixed
+    header would mislabel every cell six days out of seven.
+
+    M/T/W/T/F/S/S is ambiguous on its own (two T's, two S's). It is not ambiguous
+    in place: the header prints the date range, the rightmost cell is always
+    today, and the row only has to answer "which day did I miss."
+    """
+    days = [today - timedelta(days=i) for i in range(width - 1, -1, -1)]
+    return " ".join(d.strftime("%a")[0] for d in days)
+
+
+def cells_from_threshold(
+    values: list[float] | None, threshold: float, direction: str
+) -> list[bool | None] | None:
+    """Turn a continuous per-day series into hit/miss cells against the threshold.
+
+    Sleep is the only caller: the collector stores 14 nights of actual hours, and
+    the dashboard shows the last 7 scored against the ≥6h bar. The richer series
+    stays in the state file on purpose — a future view can use it, and `surging`
+    already does. The DISPLAY is binary; the DATA is not.
+
+    ⚠️ `None` must survive as `None`. A night with no record is unknown, not a
+    miss — the distinction the whole tool is built on.
+    """
+    if not values:
+        return None
+    series = list(values)[-STRIP_WIDTH:]
+    if not any(v is not None for v in series):
+        return None
+    out: list[bool | None] = []
+    for v in series:
+        if v is None:
+            out.append(None)
+        elif direction == "max":
+            out.append(v <= threshold)
+        else:
+            out.append(v >= threshold)
+    return out
+
+
+def strip(days: list | None, width: int = STRIP_WIDTH) -> str:
     """One cell per day of the rolling window: did it happen, or not.
 
     ⚠️ This replaced an eighth-block sparkline that rendered as a SOLID BLACK BAR
@@ -212,53 +277,6 @@ def strip(days: list | None, width: int = 7) -> str:
     marks = [STRIP_UNKNOWN if d is None else (STRIP_HIT if d else STRIP_MISS) for d in cells]
     pad = "  " * (width - len(cells))
     return pad + " ".join(marks)
-
-
-def sparkline(values: list[float] | None, width: int = SPARK_WIDTH) -> str:
-    """History as one row of blocks — the rolling-7 value sampled daily.
-
-    Glyphs verified on Alex's terminal (Ghostty/JetBrains Mono) 2026-08-11 with a
-    JAGGED test row — an ascending staircase hides misalignment, which is how the
-    `left` build passed four checks and still looked wrong on screen.
-
-    Always exactly `width` cells so every row's columns line up. Zero always
-    renders as the floor glyph, so "did nothing" is visibly distinct from "did a
-    little" even when the series is flat.
-
-    ⚠️ `None` means NO DATA and renders as a BLANK cell, holding its position.
-    It must never collapse into the floor glyph: on 2026-08-11 the first build
-    drew five weeks of floor blocks for weeks that simply predated the Craft
-    mirror, which reads as "you journaled nothing" instead of "we don't know."
-    """
-    if not values:
-        return " " * width
-    series = list(values)[-width:]
-    pad = " " * (width - len(series))
-    known = [v for v in series if v is not None]
-    if not known:
-        return " " * width
-    top, bottom = max(known), min(known)
-    # ⚠️ Scale to the OBSERVED RANGE, not to zero. Anchoring at zero is what made
-    # the sleep row a solid black slab on 2026-08-13: seven nights between 6.3h
-    # and 8.0h all land in the top eighth, every cell fills, and adjacent cells
-    # merge into a rectangle. Nobody needs a chart to be told sleep is not zero —
-    # the interesting variation is the 1.7h between his best night and his worst,
-    # and only a range-scaled axis can show it.
-    #
-    # A genuine zero still renders as the floor: if the series touches 0, the
-    # bottom of the range IS 0 and the scaling below puts it on SPARK[0].
-    span = top - bottom
-    out = []
-    for v in series:
-        if v is None:
-            out.append(" ")
-        elif span <= 0:
-            # Truly flat. A mid-height row is honest; a full-height one is not.
-            out.append(SPARK[len(SPARK) // 2])
-        else:
-            idx = round((v - bottom) / span * (len(SPARK) - 1))
-            out.append(SPARK[max(0, min(idx, len(SPARK) - 1))])
-    return pad + "".join(out)
 
 
 def fmt_value(r: Reading) -> str:
@@ -305,6 +323,11 @@ def render(cfg: dict, state: dict, color: bool = True) -> str:
         + "      "
         + c(DIM, "● on track   ○ off   ▲ surging   — no data")
     )
+    # The weekday row is the fix for "without headers I don't really know what I'm
+    # looking at." It MUST line up with the strip cells below it, so both the
+    # indent and the cell spacing come from the same constants as the data rows —
+    # a hand-counted indent here drifts the moment a column width changes.
+    lines.append(" " * ROW_PREFIX_WIDTH + c(DIM, day_labels(date.today())))
     lines.append("")
 
     for r in readings:
@@ -324,10 +347,13 @@ def render(cfg: dict, state: dict, color: bool = True) -> str:
         if r.provisional:
             note = f"{note}  [provisional]" if note else "[provisional]"
 
-        chart = strip(r.days) if r.days else f"{sparkline(r.history, width=13):<13}"
+        # One grammar for every row. `days` if the collector produced it, else
+        # derive cells from a continuous series against the threshold (sleep).
+        cells = r.days or cells_from_threshold(r.history, r.threshold, r.direction)
+        chart = strip(cells)
         lines.append(
-            f"  {mark} {r.label:<11}{fmt_value(r):<8}"
-            + c(DIM, f"{fmt_threshold(r):<7}")
+            f"  {mark} {r.label:<{LABEL_W}}{fmt_value(r):<{VALUE_W}}"
+            + c(DIM, f"{fmt_threshold(r):<{THRESH_W}}")
             + f"{c(DIM, chart)}   "
             + (c(DIM, note) if note else "")
         )

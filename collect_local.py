@@ -115,11 +115,28 @@ def journal_days(days: list[date]) -> list[tuple[date, bool, str]]:
     return rows
 
 
-def days_since_publish() -> tuple[int | None, str]:
-    """Days since anything went live on alexpriest.com."""
+def publish_dates() -> set[date]:
+    """Every date something is live on alexpriest.com for."""
+    out: set[date] = set()
+    if not SITE_WRITING.exists():
+        return out
+    for f in SITE_WRITING.glob("*.md"):
+        head = f.read_text(errors="ignore")[:1200]
+        status = re.search(r"^status:\s*(\S+)", head, re.M)
+        if not status or status.group(1).strip("'\" ") != "published":
+            continue
+        stamp = re.search(r"^(?:date|created):\s*'?\[?\[?(\d{4}-\d{2}-\d{2})", head, re.M)
+        if not stamp:
+            continue
+        out.add(date.fromisoformat(stamp.group(1)))
+    return out
+
+
+def newest_published() -> tuple[date, str] | None:
+    """The most recent published piece, as (date, title)."""
     newest: tuple[date, str] | None = None
     if not SITE_WRITING.exists():
-        return None, ""
+        return None
     for f in SITE_WRITING.glob("*.md"):
         head = f.read_text(errors="ignore")[:1200]
         status = re.search(r"^status:\s*(\S+)", head, re.M)
@@ -131,9 +148,33 @@ def days_since_publish() -> tuple[int | None, str]:
         d = date.fromisoformat(stamp.group(1))
         if newest is None or d > newest[0]:
             newest = (d, f.stem)
+    return newest
+
+
+def days_since_publish() -> tuple[int | None, str, list[bool] | None]:
+    """Days since anything went live, plus a publish/no-publish cell per day.
+
+    📌 The `days` list is why this returns three things. The writing row shipped
+    with only a value and a note, so its chart column rendered EMPTY — and Alex
+    read that blank, reasonably, as a broken chart rather than as "this metric has
+    no daily series." A blank cell has to be impossible to confuse with a bug.
+
+    Publishing is not a daily habit and the strip is honest about that: most weeks
+    are seven misses, and the VALUE (`0d` / `160d`) plus the status mark carry the
+    verdict against the ≤30d threshold. What the strip adds is the thing he asked
+    for — a published-today shows up immediately, in the same grammar as every
+    other row.
+    """
+    newest = newest_published()
     if newest is None:
-        return None, ""
-    return (date.today() - newest[0]).days, f'last: "{newest[1]}", {newest[0]:%b %-d}'
+        return None, "", None
+    published = publish_dates()
+    days = [d in published for d in last_7_days()]
+    return (
+        (date.today() - newest[0]).days,
+        f'last: "{newest[1]}", {newest[0]:%b %-d}',
+        days,
+    )
 
 
 def last_7_days(today: date | None = None) -> list[date]:
@@ -177,7 +218,7 @@ def journal_history(days: int = 14, today: date | None = None) -> list[int | Non
 def collect() -> dict:
     rows = journal_days(last_7_days())
     hit = sum(1 for _, ok, _ in rows if ok)
-    since, note = days_since_publish()
+    since, note, pub_days = days_since_publish()
 
     metrics = {
         "journal": {
@@ -189,7 +230,7 @@ def collect() -> dict:
         }
     }
     if since is not None:
-        metrics["writing"] = {"value": since, "note": note}
+        metrics["writing"] = {"value": since, "note": note, "days": pub_days}
 
     return {"written_at": datetime.now().astimezone().isoformat(), "metrics": metrics}
 
