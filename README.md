@@ -5,16 +5,18 @@ accountability text. No manual tracking, ever — if a habit leaves digital
 exhaust, ticking a box for it is input tax that produces no new information.
 
 ```
-  WEEK OF AUG 10        ● hit   · on pace   ○ off   ▲ surging   — no data
+  LAST 7 DAYS  Aug 11–Aug 17      ● on track   ○ off   ▲ surging   — no data
+                              T W T F S S M
 
-  — lifts      —       ≥1
-  — sleep      —       ≥6h
-  — rides      —       ≥3
-  · journal    2/7     ≥4          ▆██  5d left in week  [provisional]
-  ○ writing    154d    ≤30d             last: "South by AI", Mar 10
-  — outreach   —       ≥3
+  ● lifts      2       ≥1     ■ □ □ ■ □ □ □
+  ● sleep      6h58    ≥6h    ■ ■ ■ □ ■ ■ ■   5.6–7.8h
+  ● rides      3       ≥3     □ ■ ■ □ ■ □ □   ≥30min, no e-bike
+  ● journal    7/7     ≥4     ■ ■ ■ ■ ■ ■ ■   [provisional]
+  ● writing    0d      ≤30d   □ □ □ □ □ □ ■   last: "Fuck it, let's go", Aug 17
+  ● outreach   10      ≥3     ■ ■ ■ ■ □ □ □
+  — fasting    —       ≥4     · · · · · · ·   not answered yet
 
-  48y 182d left · 2,530 Saturdays · 43.6% spent
+  48y 176d left · 2,529 Saturdays · 43.6% spent
 ```
 
 ## The plan
@@ -40,12 +42,22 @@ the answer gets logged. Spending was cut.
 
 **Outreach counts conversations STARTED, not messages sent.** "Messages sent" is
 265 a week, mostly to Miranda and to live group chats, and would read as a hit
-forever. A conversation counts only when Alex sent the first message after 14
-days of silence — which surfaces the reconnections (Adam Pelavin after 49 days)
-and ignores the daily traffic. On email the test is different and simpler: the
-thread's *first sender* must be Alex, because `in:sent` labels an entire thread
-if any one message in it was sent, so replying to a marketing blast otherwise
-drags that blast in under its own subject.
+forever. A conversation counts only when Alex sent the first message after **30**
+days of silence, which surfaces the reconnections (Adam Pelavin after 49) and
+ignores the daily traffic. Email gets the same dormancy test plus one extra rule:
+the thread's *first sender* must be Alex, because `in:sent` labels an entire
+thread if any one message in it was sent, so replying to a marketing blast would
+otherwise drag that blast in under its own subject.
+
+⚠️ **Known weakness: the test is DORMANCY, not relationship.** A vendor emailed
+every five weeks passes it forever. In the 2026-08-17 window, 5 of 10 hits were
+transactional — a utility complaint, a support ticket, a car detailer, a "have a
+great vacation", and a bike-shop delivery ETA. That last one is the *same* vendor
+the 2026-08-13 dormancy fix was written to exclude, which is the tell that a time
+threshold cannot express what this metric is actually for. The verdict does not
+flip (5 real reconnections still clears ≥3), so it ships as-is and is written
+down rather than quietly tuned. `gap_days` is also hardcoded `null` on the email
+path, so email cannot show its work.
 
 **Fasting reads from Window** (`~/Code/projects/window`), Alex's own iOS tracker.
 It was parked 2026-08-13 because capture was the problem — Zero has no API,
@@ -88,7 +100,7 @@ silently ate 53 of 60 concurrent vault writes.
 ## Rules this thing was built around
 
 **Never show a number you don't have.** A missing source renders `—`, a stale one
-carries its age, and a `None` in a sparkline is a blank cell. It cost two rounds
+carries its age, and a day with no data is `·`, never a miss. It cost two rounds
 to get this right: the first history pass drew five weeks of floor blocks for
 weeks that simply predate the Craft mirror (which starts 2026-07-16), which reads
 as *"you journaled nothing"* rather than *"we don't know."* Partial weeks are
@@ -100,22 +112,36 @@ apparatus just to avoid reading as failure all week. A rolling window always
 means the same thing on any day — and deleting the calendar week deleted that
 code. Where a calendar week still matters (the Sunday text), it starts Monday.
 
-**Pick the mark by the shape of the data.** Daily yes/no habits get a 7-day
-strip (`●●●●○●●`) — one cell per day of the window, which shows *which* day was
-missed, not just how many. Continuous series (sleep hours) get a sparkline.
+**One grammar, one window, every row.** Every chart is a 7-day strip covering the
+same days as the header, with a weekday row above it. `■` did it, `□` didn't, `·`
+unknown. The strip shows *which* day was missed, not just how many.
 
-This was learned the ugly way. Journaling first shipped as an eighth-block
-sparkline anchored at zero, which was mathematically honest and visually a
-**solid black bar**: values sitting high and flat (6–7 of 7) fill every cell to
-near-full height, adjacent cells merge, and the result reads as a redaction.
-Worse, it was defended on theory — *"flat should look flat"* — in the message
-right after promising to look at things on the real screen first.
+Continuous series used to get a sparkline instead. That is gone (2026-08-17), and
+the reason is worth keeping: it drew **13** cells under a header reading LAST 7
+DAYS, unlabelled, scaled from Alex's worst night rather than from zero — so the
+shape could not be decoded without a range nobody printed. His verdict: *"the
+visual is not particularly useful"* and *"without headers I don't really know what
+I'm looking at."* Magnitude a binary cell drops now goes in the note as text
+(sleep prints `5.6–7.8h`), which needs no legend. `history` is still collected and
+still drives `surging`; it just is not drawn.
 
-**Look at the glyphs on the real terminal.** `▁▂▃▄▅▆▇█` was verified in Ghostty /
-JetBrains Mono with a *jagged* test row — an ascending staircase hides
-misalignment, which is how the `left` build passed four checks and still rendered
-wrong on screen. `habits --glyph-test` reprints the candidates. Braille and
-box-drawing corners failed and are not used.
+**Look at the glyphs on the real terminal — and stack the rows.** This one has now
+been learned three times, on two axes:
+
+1. The `left` build passed four checks and still rendered wrong on screen.
+2. Journaling shipped as an eighth-block sparkline anchored at zero. Values high
+   and flat (6–7 of 7) filled every cell, adjacent cells merged **horizontally**,
+   and it read as a redaction. It was then defended on theory — *"flat should look
+   flat"* — in the message right after promising to look at the real screen first.
+3. The strip shipped with `█`/`░`, which paint the full character cell including
+   its leading, so filled cells fused **vertically** into one solid bar down the
+   column. `--glyph-test` could not catch it: it printed ONE row per candidate and
+   only ever checked horizontal alignment.
+
+`habits --glyph-test` now stacks seven rows in a jagged pattern and says to look
+*down* the columns. An ascending staircase, or a single row, hides exactly the
+defect you are looking for. Braille and box-drawing corners failed and are not
+used.
 
 ## Known limits
 
@@ -130,7 +156,8 @@ printed rather than buried.
 
 ## Status
 
-- ✅ CLI, renderer, rolling-7 windows, 14-day sparklines, config, state merge
+- ✅ CLI, renderer, rolling-7 windows, 7-day strips + weekday labels, config,
+      state merge
 - ✅ Local collectors: journal (+ 8-week history), writing
 - ✅ Outreach collector (iMessage + Gmail), conversations started
 - ✅ Fasting row, eating-window log, Zero export importer
