@@ -179,18 +179,25 @@ def hevy_lifts(today: date) -> dict:
 
 
 def oura_sleep(today: date) -> dict:
-    # The 1Password item is "Oura MCP", not "Oura API" — the latter never existed,
-    # so this read failed silently for as long as the collector has run (verified
-    # 2026-08-14: `op item list --vault Claude` has exactly one Oura entry).
+    # There is no "Oura API" item and never was; the vault entry is "Oura MCP".
     #
-    # ⚠️ `pat` FIRST, `credential` second, and the order is the whole point. That
-    # item's `credential` is an MCP OAuth passcode, which 401s against the REST API
-    # (retested 2026-08-17: "expired, revoked, malformed, or invalid"). ANT-470 asks
-    # Alex to mint a real personal access token into a NEW `pat` field, so `pat` is
-    # the one that will work and it has to win.
+    # ⚠️ TWO items now share that exact title (2026-08-17: Alex minted the PAT into a
+    # NEW item rather than adding a field to the old one), and `op read` by title
+    # fails outright on ambiguity — "More than one item matches" — rather than
+    # picking one. So a by-title ref resolves NOTHING today, including the legacy
+    # `credential` one that used to work. Hence the middle ref by item ID.
+    #
+    # Order is load-bearing:
+    #   1. by title, `pat`        — the end state IF the two items are ever merged
+    #   2. by item ID, `pat`      — what actually resolves right now
+    #   3. by title, `credential` — legacy; that field is an MCP OAuth passcode and
+    #                               401s against the REST API anyway (retested today)
+    # Each miss costs ~1.3s of `op` error, well inside the 12s timeout, and 1 starts
+    # winning the moment the duplicate title goes away. Nothing to change here then.
     token = secret(
         "HABITS_OURA_TOKEN",
         "op://Claude/Oura MCP/pat",
+        "op://Claude/kjib67gu63e2e55jswdoe74r4a/pat",
         "op://Claude/Oura MCP/credential",
     )
     start = today - timedelta(days=HISTORY_DAYS)

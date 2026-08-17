@@ -134,15 +134,13 @@ printed rather than buried.
 - ✅ Local collectors: journal (+ 8-week history), writing
 - ✅ Outreach collector (iMessage + Gmail), conversations started
 - ✅ Fasting row, eating-window log, Zero export importer
-- ⬜ Fasting shows `—` until Window is on his phone (needs TestFlight)
 - ✅ SwiftBar menu bar reader
 - ✅ `habits refresh` / `habits journal` / `habits fast`
 - ✅ install.sh + launchd refresh (Mini, every 2h + at load)
 - ✅ Hevy and Strava self-refresh from 1Password (live since 2026-08-13)
-- 🔴 **Oura sleep is broken** — the token in `op://Claude/Oura MCP/credential` is an
-      MCP OAuth credential, not a personal access token, and now returns HTTP 401
-      outright. The sleep row ages visibly and correctly. Needs a PAT minted by
-      Alex; tracked in ANT-470. See *Credentials* below.
+- ✅ **Oura sleep live 2026-08-17** — Alex minted a PAT; 200 on
+      `/v2/usercollection/sleep`, 6h58 over 6/7 nights. ANT-470 closed. See
+      *Credentials* for the duplicate-title trap it left behind.
 - 🔴 **The weekly text has never delivered.** The plist IS loaded (`--with-text`
       was run 2026-08-13), and its first scheduled run — Sun 2026-08-16 21:00 —
       died with `subprocess.TimeoutExpired` after 60s on `imsg send`. Nothing
@@ -159,13 +157,24 @@ line, so no secret lands in shell history or a process list.
 |---|---|---|
 | `op://Claude/Hevy API/credential` | ✅ live | hevy.com/settings?developer |
 | `op://Claude/Strava MCP/*` | ✅ live | the refresh token stays on the Railway volume; nothing here expires |
-| `op://Claude/Oura MCP/credential` | 🔴 401 | cloud.ouraring.com/personal-access-tokens — **a PAT, not the MCP OAuth passcode** |
+| `op://Claude/<item-id>/pat` | ✅ live | cloud.ouraring.com/personal-access-tokens — **a PAT, not the MCP OAuth passcode** |
 
-⚠️ **There is no `Oura API` item and there never was** — the vault has exactly one
-Oura entry, `Oura MCP`, and what it holds is an OAuth credential for the MCP
-server. Pointing the collector at it (commit 17a864c) fixed the *lookup*; the
-token itself still 401s against `api.ouraring.com`. The two are different
-credentials and only a personal access token works here.
+🚨 **TWO items in the Claude vault are both titled `Oura MCP`, so every by-title
+`op read` against that name fails.** Not "picks the wrong one" — `op` refuses:
+`could not get item Claude/Oura MCP: More than one item matches "Oura MCP"`. The
+older item (`522anp…`, 2026-08-13) holds the dead `credential` / MCP OAuth
+passcode; the newer one (`kjib67…`, 2026-08-17) holds the working `pat`. That is
+why `oura_sleep()` carries a **by-item-ID** ref in the middle of its list — it is
+the only one that resolves today.
+
+The list is ordered so it survives a cleanup: if the two items are ever merged
+into one, the by-title `pat` ref starts winning and the ID ref becomes dead
+weight. Nothing in the code needs to change when that happens.
+
+📌 There is no `Oura API` item and there never was — that reference (fixed in
+17a864c) was the *first* of the three faults here. The second was that
+`credential` holds an OAuth passcode, not a PAT. The third was this title
+collision. Each one presented as "sleep is stale."
 
 Rides do not go through a token at all — they go through the deployed
 `strava-mcp-server`, which speaks the **older HTTP+SSE** MCP transport (`/sse` +
