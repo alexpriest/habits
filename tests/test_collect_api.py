@@ -127,3 +127,66 @@ class OuraDayIsTheWakeDate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CredentialResolution(unittest.TestCase):
+    """`op` with no service-account token falls back to the 1Password
+    desktop-app integration, which is a GUI prompt. Under launchd nobody
+    answers it and the call burns its timeout; in an agent session it lands on
+    Alex's screen. Both failures have already happened — habits on 2026-08-13,
+    the Hunter MCP launcher on 2026-08-26 (ANT-676).
+
+    The token also no longer lives only in ~/.zshrc, so the old
+    `zsh -ic` hop is not something to depend on.
+    """
+
+    OP_REF = "op://Claude/Example/credential"
+
+    def run_secret(self, token_file, environ):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs.get("env")))
+            return mock.Mock(returncode=0, stdout="resolved-secret\n")
+
+        with mock.patch.dict(collect_api.os.environ, environ, clear=True), \
+             mock.patch.object(collect_api, "OP_TOKEN_FILE", token_file), \
+             mock.patch.object(collect_api.subprocess, "run", side_effect=fake_run):
+            value = collect_api.secret("EXAMPLE_TOKEN", self.OP_REF)
+        return value, calls
+
+    def test_op_is_never_allowed_to_prompt(self):
+        with mock.patch("pathlib.Path.is_file", return_value=False):
+            _, calls = self.run_secret(collect_api.OP_TOKEN_FILE, {})
+        self.assertTrue(calls, "expected at least one op invocation")
+        for argv, env in calls:
+            self.assertIsNotNone(env, f"{argv} was given no environment")
+            self.assertEqual(env.get("OP_BIOMETRIC_UNLOCK_ENABLED"), "false", argv)
+
+    def test_token_file_supplies_the_service_account_when_the_environment_does_not(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "op-service-account.env"
+            token_file.write_text("export OP_SERVICE_ACCOUNT_TOKEN='ops_from_file'\n")
+            value, calls = self.run_secret(token_file, {})
+
+        self.assertEqual(value, "resolved-secret")
+        self.assertTrue(calls)
+        self.assertEqual(calls[0][1].get("OP_SERVICE_ACCOUNT_TOKEN"), "ops_from_file")
+
+    def test_an_ambient_token_is_not_overwritten_by_the_file(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "op-service-account.env"
+            token_file.write_text("export OP_SERVICE_ACCOUNT_TOKEN='ops_from_file'\n")
+            _, calls = self.run_secret(
+                token_file, {"OP_SERVICE_ACCOUNT_TOKEN": "ops_from_environment"}
+            )
+
+        self.assertEqual(
+            calls[0][1].get("OP_SERVICE_ACCOUNT_TOKEN"), "ops_from_environment"
+        )

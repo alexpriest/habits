@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import re
 import sys
@@ -64,6 +65,32 @@ class SourceError(RuntimeError):
 # ------------------------------------------------------------- credentials
 
 
+# The machine's one service-account token. Kept in a single file so a rotation
+# cannot leave a stale copy behind (ANT-676, ANT-677).
+OP_TOKEN_FILE = pathlib.Path(
+    os.environ.get("OP_SERVICE_ACCOUNT_TOKEN_FILE", "~/.config/op-service-account.env")
+).expanduser()
+
+_TOKEN_LINE = re.compile(
+    r"""^\s*(?:export\s+)?OP_SERVICE_ACCOUNT_TOKEN=['"]?([^'"\s]+)""", re.MULTILINE
+)
+
+
+def _op_environment() -> dict[str, str]:
+    """The environment `op` gets: never able to prompt, and carrying the token.
+
+    The file is parsed rather than sourced — this needs one variable out of it,
+    not arbitrary shell.
+    """
+    environment = dict(os.environ)
+    environment["OP_BIOMETRIC_UNLOCK_ENABLED"] = "false"
+    if not environment.get("OP_SERVICE_ACCOUNT_TOKEN") and OP_TOKEN_FILE.is_file():
+        match = _TOKEN_LINE.search(OP_TOKEN_FILE.read_text())
+        if match:
+            environment["OP_SERVICE_ACCOUNT_TOKEN"] = match.group(1)
+    return environment
+
+
 def secret(env_var: str, *op_refs: str) -> str:
     """env -> op -> op inside an interactive zsh, over each ref in order.
 
@@ -72,13 +99,18 @@ def secret(env_var: str, *op_refs: str) -> str:
     has to prefer the `pat` field and fall back to `credential`. A single ref meant
     ANT-470 could tell Alex to add a `pat` field that nothing would ever read.
 
-    ⚠️ The third hop is not paranoia, it is the launchd case. OP_SERVICE_ACCOUNT_TOKEN
-    is defined in ~/.zshrc, and .zshrc is read ONLY by interactive shells — not by
-    `zsh -lc`, and certainly not by launchd, which runs no shell at all. Verified
-    2026-08-13 from the refresh job's own log: every `op read` sat there and hit
-    the 30-second timeout, because with no token `op` falls back to prompting a
-    human who is not there. `zsh -ic` sources .zshrc and resolves in under a
-    second from a clean environment.
+    ⚠️ The launchd case. With no OP_SERVICE_ACCOUNT_TOKEN, `op` falls back to the
+    1Password desktop-app integration — and that fallback is a GUI prompt, not an
+    error. Under launchd nobody answers it and the call burns its timeout;
+    inside an agent session it lands on Alex's screen. Verified 2026-08-13 from
+    the refresh job's own log: every `op read` sat there and hit the 30-second
+    timeout. The Hunter MCP launcher hit the same wall on 2026-08-26 (ANT-676).
+
+    So `op` is never given the chance to prompt: OP_BIOMETRIC_UNLOCK_ENABLED is
+    forced off, and the token is read from OP_TOKEN_FILE when the environment
+    does not carry it. The `zsh -ic` hop stays as a last resort but is no longer
+    load-bearing — the token used to live only in ~/.zshrc, which launchd never
+    reads; it now lives in one file that anything can read.
 
     Timeouts are short on purpose. Five secrets × a 30s hang was a two-and-a-half
     minute job that looked like a network problem and was actually a missing
@@ -88,6 +120,7 @@ def secret(env_var: str, *op_refs: str) -> str:
     if val:
         return val.strip()
 
+    environment = _op_environment()
     for op_ref in op_refs:
         attempts = (
             ["op", "read", op_ref],
@@ -95,7 +128,9 @@ def secret(env_var: str, *op_refs: str) -> str:
         )
         for argv in attempts:
             try:
-                proc = subprocess.run(argv, capture_output=True, text=True, timeout=12)
+                proc = subprocess.run(
+                    argv, capture_output=True, text=True, timeout=12, env=environment
+                )
             except (OSError, subprocess.SubprocessError):
                 continue
             if proc.returncode == 0 and proc.stdout.strip():
