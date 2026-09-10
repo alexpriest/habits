@@ -1,8 +1,14 @@
 # habits
 
-A CLI dashboard for the habits a machine can already see, plus a Sunday-night
-accountability text. No manual tracking, ever — if a habit leaves digital
-exhaust, ticking a box for it is input tax that produces no new information.
+A dashboard for the habits a machine can already see, so nothing has to be ticked off by hand.
+
+## Status
+
+Shipped — runs daily on a Mac Mini and sends a Sunday-night accountability text.
+
+## License
+
+Not licensed for reuse.
 
 ```
   LAST 7 DAYS  Aug 11–Aug 17      ● on track   ○ off   ▲ surging   — no data
