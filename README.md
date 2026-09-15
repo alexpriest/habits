@@ -202,9 +202,9 @@ line, so no secret lands in shell history or a process list.
 
 | Item | State | Where to get it |
 |---|---|---|
-| `op://Claude/Hevy API/credential` | ✅ live | hevy.com/settings?developer |
-| `op://Claude/Strava MCP/*` | ✅ live | the refresh token stays on the Railway volume; nothing here expires |
-| `op://Claude/Oura MCP/pat` | ✅ live | cloud.ouraring.com/personal-access-tokens — **a PAT, not the MCP OAuth passcode** |
+| `op://Agents/Hevy API/credential` | ✅ live | hevy.com/settings?developer |
+| `op://Agents/Strava MCP/*` | ✅ live | the refresh token stays on the Railway volume; nothing here expires |
+| `op://Agents/Oura MCP/pat` | ✅ live | cloud.ouraring.com/personal-access-tokens — **a PAT, not the MCP OAuth passcode** |
 
 ⚠️ **`pat` and `credential` live in the same item and are not interchangeable.**
 `credential` is an MCP OAuth passcode for the Railway MCP server; against

@@ -140,7 +140,7 @@ class CredentialResolution(unittest.TestCase):
     `zsh -ic` hop is not something to depend on.
     """
 
-    OP_REF = "op://Claude/Example/credential"
+    OP_REF = "op://Agents/Example/credential"
 
     def run_secret(self, token_file, environ):
         calls = []

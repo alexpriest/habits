@@ -6,10 +6,10 @@ Writes state/api.json.
 Credentials resolve env-first, then 1Password. Nothing is ever read from a
 command line, so a secret cannot end up in shell history or a process listing.
 
-    lifts   Hevy REST          op://Claude/Hevy API/credential
+    lifts   Hevy REST          op://Agents/Hevy API/credential
     rides   strava-mcp on Railway, over MCP Streamable HTTP
-                               op://Claude/Strava MCP/{credential,url}
-    sleep   Oura REST          op://Claude/Oura MCP/credential  (personal access token)
+                               op://Agents/Strava MCP/{credential,url}
+    sleep   Oura REST          op://Agents/Oura MCP/credential  (personal access token)
 
 Rides go through Alex's own deployed MCP server rather than the Strava API
 directly, because the Strava refresh token lives on that server's Railway volume
@@ -182,7 +182,7 @@ def count_metric(days_hit: set[date], today: date) -> dict:
 
 
 def hevy_lifts(today: date) -> dict:
-    key = secret("HABITS_HEVY_API_KEY", "op://Claude/Hevy API/credential")
+    key = secret("HABITS_HEVY_API_KEY", "op://Agents/Hevy API/credential")
     hit: set[date] = set()
     horizon = today - timedelta(days=FETCH_DAYS)
     page = 1
@@ -230,8 +230,8 @@ def oura_sleep(today: date) -> dict:
     # here ever fails again, check for a duplicate title BEFORE suspecting the token.
     token = secret(
         "HABITS_OURA_TOKEN",
-        "op://Claude/Oura MCP/pat",
-        "op://Claude/Oura MCP/credential",
+        "op://Agents/Oura MCP/pat",
+        "op://Agents/Oura MCP/credential",
     )
     start = today - timedelta(days=HISTORY_DAYS)
     # ⚠️ Oura's `end_date` is EXCLUSIVE, so this has to ask for TOMORROW to get
@@ -322,8 +322,8 @@ def parse_activities(text: str) -> tuple[list[dict], int]:
 
 
 def strava_rides(today: date) -> dict:
-    base = secret("HABITS_STRAVA_MCP_URL", "op://Claude/Strava MCP/url")
-    token = secret("HABITS_STRAVA_MCP_TOKEN", "op://Claude/Strava MCP/credential")
+    base = secret("HABITS_STRAVA_MCP_URL", "op://Agents/Strava MCP/url")
+    token = secret("HABITS_STRAVA_MCP_TOKEN", "op://Agents/Strava MCP/credential")
     try:
         text = call_tool(
             base, token, "get-recent-activities",
