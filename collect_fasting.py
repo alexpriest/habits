@@ -77,9 +77,10 @@ WHY AN APP AND NOT AN API — checked 2026-08-13, re-checked 2026-08-15
 
 THE PROTOCOL SHAPES THE MATH
 ----------------------------
-18:6 runs MONDAY–FRIDAY only; Saturday and Sunday are deliberately off (long
-ride, family). So the denominator is the 5 weekdays in the window, never 7, and
-a weekend cell is NOT a miss — it renders as unknown. Scoring Saturday as a
+18:6 runs MON, WED, THU, FRI only. Saturday and Sunday are deliberately off
+(long ride, family), and Tuesday came off 2026-10-06 (lunch with Zephyr). So the
+denominator is those 4 days in the window, never 7, and an off-day cell is NOT a
+miss — it renders as unknown. Scoring Saturday as a
 failure would be scoring him against a rule he does not have.
 """
 
@@ -102,7 +103,7 @@ SESSIONS = (
 STATE = HOME / "Code" / "tools" / "habits" / "state" / "fasting.json"
 
 WINDOW_DAYS = 7
-WEEKDAYS = {0, 1, 2, 3, 4}  # Monday..Friday — the protocol's actual span
+WEEKDAYS = {0, 2, 3, 4}  # Mon, Wed, Thu, Fri — Tuesday off since 2026-10-06 (lunch with Zephyr)
 WEEKDAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 # Higher wins. An unknown source gets 0 and therefore never displaces a known one.

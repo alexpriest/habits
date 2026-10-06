@@ -334,14 +334,15 @@ class TheWindow(unittest.TestCase):
     def metric(self, today: date) -> dict:
         return cf.collect(today=today, log=cf.load_log(self.log))["metrics"]["fasting"]
 
-    def test_a_weekend_is_never_a_miss(self):
+    def test_off_days_are_never_a_miss(self):
         # Saturday 2026-08-15 is a Saturday; Sunday the 16th follows.
         m = self.metric(date(2026, 8, 16))
 
-        # The window is Mon 10 .. Sun 16. Sat and Sun are the last two cells.
+        # The window is Mon 10 .. Sun 16. Tue (cell 1), Sat and Sun are off days.
+        self.assertIsNone(m["days"][1])
         self.assertIsNone(m["days"][-1])
         self.assertIsNone(m["days"][-2])
-        self.assertEqual(m["unit_denominator"], 5)
+        self.assertEqual(m["unit_denominator"], 4)
 
     def test_an_unanswered_weekday_is_unknown_not_broken(self):
         write_lines(
@@ -359,7 +360,7 @@ class TheWindow(unittest.TestCase):
 
         self.assertIsNone(m["value"])
 
-    def test_a_full_week_scores_five_of_five(self):
+    def test_a_full_week_scores_four_of_four(self):
         write_lines(
             self.log,
             [
@@ -370,8 +371,9 @@ class TheWindow(unittest.TestCase):
 
         m = self.metric(date(2026, 8, 14))
 
-        self.assertEqual(m["value"], 5)
-        self.assertEqual(m["unit_denominator"], 5)
+        # Tuesday the 11th was fasted but is an off day, so it doesn't count.
+        self.assertEqual(m["value"], 4)
+        self.assertEqual(m["unit_denominator"], 4)
         self.assertEqual(m["note"], "")
 
 
@@ -399,7 +401,8 @@ class EndToEnd(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         blob = json.loads(state.read_text())
-        self.assertEqual(blob["metrics"]["fasting"]["value"], 4)
+        # Days 11-14 include Tuesday the 11th, an off day.
+        self.assertEqual(blob["metrics"]["fasting"]["value"], 3)
         self.assertTrue((d / "fasts-copy.jsonl").exists())
 
 

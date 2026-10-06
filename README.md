@@ -41,7 +41,7 @@ you stop opening.
 | journal | Craft daily notes (mirror) | < 4 days this week |
 | writing | `Site/Writing` published (content vault) | nothing in > 30 days |
 | outreach | Gmail sent + iMessage | < 3 *initiated* this week |
-| fasting | Window sessions via iCloud | < 4 of the 5 weekdays held |
+| fasting | Window sessions via iCloud | < 3 of the 4 fasting days (Mon, Wed, Thu, Fri) held |
 
 Reading is deliberately *not* tracked — it's a question the Sunday text asks, and
 the answer gets logged. Spending was cut.
@@ -71,7 +71,7 @@ HealthKit has no fasting type, and macOS has no Health app — and un-parked
 2026-08-15 when he approved building the app. Window writes one line per
 completed fast to its iCloud container; `collect_fasting.py` turns those into
 one verdict per day. **The app records facts and this repo makes the judgment**,
-so the 18h threshold and the Mon–Fri denominator stay in a file he can edit
+so the 18h threshold and the Mon/Wed/Thu/Fri denominator stay in a file he can edit
 rather than in a TestFlight build.
 
 ## Layout
