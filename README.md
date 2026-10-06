@@ -42,6 +42,7 @@ you stop opening.
 | writing | `Site/Writing` published (content vault) | nothing in > 30 days |
 | outreach | Gmail sent + iMessage | < 3 *initiated* this week |
 | fasting | Window sessions via iCloud | < 3 of the 4 fasting days (Mon, Wed, Thu, Fri) held |
+| drinks | Window drinks log via iCloud | < 3 dry nights this week (evening closes at 4am; tracked since 2026-10-06; info: weeknights over 2) |
 
 Reading is deliberately *not* tracked — it's a question the Sunday text asks, and
 the answer gets logged. Spending was cut.
@@ -83,6 +84,7 @@ collect_api.py       Hevy, Oura, Strava
 collect_outreach.py  iMessage + Gmail, conversations started
 mcp_client.py        minimal MCP Streamable-HTTP client (rides)
 collect_fasting.py   Window sessions (iCloud) -> one verdict per day
+collect_drinks.py    Window drinks log (iCloud) -> dry nights per week
 import_zero.py       one-off backfill from a Zero "Download My Data" export
 tests/               unittest; python3 -m unittest discover -s tests -t .
 sunday_text.py       the weekly accountability text
@@ -90,7 +92,7 @@ install.sh           symlink, config, launchd — per machine
 ```
 
 - Config: `~/.config/habits/config.json` (thresholds; falls back to `DEFAULTS`)
-- State: `~/Code/tools/habits/state/{local,api,outreach,fasting}.json`
+- State: `~/Code/tools/habits/state/{local,api,outreach,fasting,drinks}.json`
 - Logs: `~/.local/state/habits/com.alexpriest.habits-*.log` (launchd stdout/stderr)
 
 State lives **in the repo**, not under `~/.local/state`, because `~/Code` is what
@@ -100,7 +102,7 @@ timer: two machines collecting into one synced file would be two writers racing.
 
 **One state file per writer.** `collect_local.py` → `local.json`, `collect_api.py`
 → `api.json`, `collect_outreach.py` → `outreach.json`, `collect_fasting.py` →
-`fasting.json`. Two writers on one file would clobber — the same failure that
+`fasting.json`, `collect_drinks.py` → `drinks.json`. Two writers on one file would clobber — the same failure that
 silently ate 53 of 60 concurrent vault writes.
 
 ## Rules this thing was built around

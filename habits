@@ -14,7 +14,7 @@ Subcommands:
     habits fast ...     log whether the eating window held
 
 Config: ~/.config/habits/config.json
-State:  ~/Code/tools/habits/state/{local,api,outreach,fasting}.json
+State:  ~/Code/tools/habits/state/{local,api,outreach,fasting,drinks}.json
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ STATE_DIR = Path.home() / "Code" / "tools" / "habits" / "state"
 # One file per WRITER, never per metric — two processes sharing a file is the
 # read-modify-write race that silently ate 53 of 60 concurrent vault writes.
 # Adding a collector means adding its name here.
-SOURCES = ("local", "api", "outreach", "fasting")
+SOURCES = ("local", "api", "outreach", "fasting", "drinks")
 
 # Every metric: label, direction, threshold, unit renderer.
 # direction "min" -> off track when value < threshold
@@ -50,6 +50,9 @@ DEFAULTS: dict = {
         # Mon, Wed, Thu, Fri only, so the denominator is 4 and an off-day cell is unknown,
         # never a miss. Derived from Window sessions by collect_fasting.py.
         "fasting": {"label": "fasting", "direction": "min", "threshold": 3, "unit": "weekdays"},
+        # Dry nights in the rolling week; tracking began 2026-10-06, earlier days are unknown.
+        # Derived from Window's drinks.jsonl by collect_drinks.py.
+        "drinks": {"label": "drinks", "direction": "min", "threshold": 3, "unit": "dry nights"},
     },
     "surge_multiplier": 1.5,
     "stale_after_hours": 26,
@@ -438,7 +441,8 @@ def glyph_test() -> str:
     return "\n".join(out)
 
 
-COLLECTORS = ("collect_local.py", "collect_api.py", "collect_outreach.py", "collect_fasting.py")
+COLLECTORS = ("collect_local.py", "collect_api.py", "collect_outreach.py", "collect_fasting.py",
+              "collect_drinks.py")
 
 
 def repo_dir() -> Path:

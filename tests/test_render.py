@@ -129,6 +129,8 @@ class RenderedDashboard(unittest.TestCase):
             "writing": {"value": 0, "days": [False] * 6 + [True], "note": "last: x"},
             "outreach": {"value": 10, "days": week},
             "fasting": {"value": None, "days": [None] * 7},
+            "drinks": {"value": 3, "days": [None, True, False, True, True, False, None],
+                       "counts": [None, 0, 3, 0, 0, 1, None]},
         }
 
     def chart_rows(self, lines: list[str]) -> list[str]:
