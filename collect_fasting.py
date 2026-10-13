@@ -101,9 +101,13 @@ SESSIONS = (
     / "Documents" / "fasts.jsonl"
 )
 STATE = HOME / "Code" / "tools" / "habits" / "state" / "fasting.json"
+# Circa's dated protocols (ANT-1042): which weekdays were fasting days from when.
+PROTOCOLS = SESSIONS.with_name("protocols.jsonl")
 
 WINDOW_DAYS = 7
-WEEKDAYS = {0, 2, 3, 4}  # Mon, Wed, Thu, Fri — Tuesday off since 2026-10-06 (lunch with Zephyr)
+# Mon, Wed, Thu, Fri — Tuesday off since 2026-10-06 (lunch with Zephyr). Used only for days no
+# Circa protocol covers (before its first record, or when protocols.jsonl is missing).
+WEEKDAYS = {0, 2, 3, 4}
 WEEKDAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 # Higher wins. An unknown source gets 0 and therefore never displaces a known one.
@@ -277,20 +281,62 @@ def sync_days(days: dict[date, dict], path: Path = LOG) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def read_protocols(path: Path = PROTOCOLS) -> list[tuple[date, set[int]]]:
+    """protocols.jsonl -> [(effective date, fasting weekdays as Python weekday numbers)], in file
+    order. A record whose schedule is off or empty says nothing about weekdays and is skipped, so
+    the day falls back to the record before it (or WEEKDAYS). Unreadable means no protocols."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return []
+    out: list[tuple[date, set[int]]] = []
+    for line in text.splitlines():
+        try:
+            rec = json.loads(line)
+            effective = datetime.fromisoformat(rec["effective_from"]).date()
+            schedule = rec.get("schedule") or {}
+            days = schedule.get("days") or []
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            continue
+        # Circa's days run Sunday first; Python's weekday() runs Monday first.
+        fasting = {(index - 1) % 7 for index, window in enumerate(days) if window}
+        if schedule.get("is_on") and fasting:
+            out.append((effective, fasting))
+    return out
+
+
+def fasting_weekdays(day: date, protocols: list[tuple[date, set[int]]]) -> set[int]:
+    """The weekdays that were fasting days on `day`: the latest record effective by then, a later
+    line winning a same-day tie (sorted() is stable, so file order breaks ties)."""
+    current = WEEKDAYS
+    for effective, fasting in sorted(protocols, key=lambda record: record[0]):
+        if effective <= day:
+            current = fasting
+    return current
+
+
 def window(today: date) -> list[date]:
     return [today - timedelta(days=i) for i in range(WINDOW_DAYS - 1, -1, -1)]
 
 
-def collect(today: date | None = None, log: dict[date, dict] | None = None) -> dict:
+def collect(
+    today: date | None = None,
+    log: dict[date, dict] | None = None,
+    protocols: list[tuple[date, set[int]]] | None = None,
+) -> dict:
     today = today or date.today()
     log = load_log() if log is None else log
+    protocols = read_protocols() if protocols is None else protocols
     win = window(today)
+
+    def is_fasting_day(d: date) -> bool:
+        return d.weekday() in fasting_weekdays(d, protocols)
 
     # None = not applicable (weekend) or not yet answered. Never False by default:
     # an unanswered Tuesday is not a broken Tuesday.
     cells: list[bool | None] = []
     for d in win:
-        if d.weekday() not in WEEKDAYS:
+        if not is_fasting_day(d):
             cells.append(None)
         elif d in log:
             cells.append(bool(log[d]["held"]))
@@ -298,7 +344,7 @@ def collect(today: date | None = None, log: dict[date, dict] | None = None) -> d
             cells.append(None)
 
     answered = [c for c in cells if c is not None]
-    weekdays_in_window = sum(1 for d in win if d.weekday() in WEEKDAYS)
+    weekdays_in_window = sum(1 for d in win if is_fasting_day(d))
 
     metric: dict = {"days": cells, "unit_denominator": weekdays_in_window}
     if not answered:

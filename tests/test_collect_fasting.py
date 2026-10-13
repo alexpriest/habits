@@ -437,3 +437,52 @@ class DefaultSourceOnTheCLI(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def protocol(effective_from: str, fasting: list[int], goal: float = 18) -> dict:
+    """A protocols.jsonl line as Circa writes it; `fasting` holds Swift weekday indexes, Sunday 0."""
+    days = [{"opens": 960, "closes": 1320} if i in fasting else None for i in range(7)]
+    return {
+        "effective_from": effective_from,
+        "goal_hours": goal,
+        "id": effective_from,
+        "mode": "scheduled",
+        "schedule": {"days": days, "is_on": True},
+        "time_zone": "America/Chicago",
+    }
+
+
+class DatedProtocols(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.log = self.tmp / "log.jsonl"
+        self.protocols = self.tmp / "protocols.jsonl"
+
+    def metric(self, today: date) -> dict:
+        return cf.collect(
+            today=today, log=cf.load_log(self.log), protocols=cf.read_protocols(self.protocols)
+        )["metrics"]["fasting"]
+
+    def test_each_day_is_judged_by_the_protocol_in_effect_that_day(self):
+        # Every weekday until Tue 2026-10-06, then Mon/Wed/Thu/Fri.
+        write_lines(self.protocols, [
+            protocol("2026-08-01T04:00:00-05:00", [1, 2, 3, 4, 5]),
+            protocol("2026-10-06T04:00:00-05:00", [1, 3, 4, 5]),
+        ])
+        # Window Thu 2026-10-01 .. Wed 2026-10-07.
+        m = self.metric(date(2026, 10, 7))
+        self.assertEqual(m["unit_denominator"], 4)  # Thu 1, Fri 2, Mon 5 (old) and Wed 7 (new); Tue 6 off
+        self.assertIsNone(m["days"][5])  # Tue the 6th, the new protocol's day off
+
+    def test_without_a_protocol_file_the_old_weekdays_stand(self):
+        m = self.metric(date(2026, 8, 16))
+        self.assertEqual(m["unit_denominator"], 4)
+
+    def test_same_day_edits_take_the_last_line(self):
+        write_lines(self.protocols, [
+            protocol("2026-10-06T04:00:00-05:00", [1, 2, 3, 4, 5]),
+            protocol("2026-10-06T04:00:00-05:00", [1, 3]),
+        ])
+        m = self.metric(date(2026, 10, 11))  # Mon 5 .. Sun 11
+        # Mon 5 is before the record, so the old weekdays judge it; from Tue 6 only Wed 7 counts.
+        self.assertEqual(m["unit_denominator"], 2)
