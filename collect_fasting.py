@@ -296,10 +296,21 @@ def read_protocols(path: Path = PROTOCOLS) -> list[tuple[date, set[int]]]:
             effective = datetime.fromisoformat(rec["effective_from"]).date()
             schedule = rec.get("schedule") or {}
             days = schedule.get("days") or []
+            starts = schedule.get("fasting_starts")
+            goal_hours = float(rec.get("goal_hours") or 18)
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             continue
         # Circa's days run Sunday first; Python's weekday() runs Monday first.
-        fasting = {(index - 1) % 7 for index, window in enumerate(days) if window}
+        if starts is not None:
+            # Build 40+: minutes after midnight when each fast starts; a fast counts on the day it
+            # ends, as derive_days keys sessions.
+            fasting = {
+                (index - 1 + int((minutes / 60 + goal_hours) // 24)) % 7
+                for index, minutes in enumerate(starts)
+                if minutes is not None
+            }
+        else:
+            fasting = {(index - 1) % 7 for index, window in enumerate(days) if window}
         if schedule.get("is_on") and fasting:
             out.append((effective, fasting))
     return out

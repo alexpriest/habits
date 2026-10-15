@@ -486,3 +486,30 @@ class DatedProtocols(unittest.TestCase):
         m = self.metric(date(2026, 10, 11))  # Mon 5 .. Sun 11
         # Mon 5 is before the record, so the old weekdays judge it; from Tue 6 only Wed 7 counts.
         self.assertEqual(m["unit_denominator"], 2)
+
+
+class FastingStartProtocols(unittest.TestCase):
+    """Circa build 40 schedules name when each fast starts (`fasting_starts`, minutes after
+    midnight, Sunday first) and leave `days` empty. Days are judged by the day the fast ends."""
+
+    def setUp(self):
+        self.path = Path(tempfile.mkdtemp()) / "protocols.jsonl"
+
+    def write(self, starts: list, goal: float) -> None:
+        write_lines(self.path, [{
+            "effective_from": "2026-10-14T00:00:00-05:00", "goal_hours": goal, "id": "x",
+            "mode": "scheduled", "time_zone": "America/Chicago",
+            "schedule": {"days": [None] * 7, "is_on": True, "fasting_starts": starts},
+        }])
+
+    def test_a_tuesday_and_friday_9pm_fast_scores_wednesday_and_saturday(self):
+        self.write([None, None, 1260, None, None, 1260, None], 18)
+        self.assertEqual(cf.read_protocols(self.path), [(date(2026, 10, 14), {2, 5})])
+
+    def test_a_72_hour_fast_scores_the_day_it_ends(self):
+        self.write([None, None, 1260, None, None, None, None], 72)  # Tue 9 PM -> Fri 9 PM
+        self.assertEqual(cf.read_protocols(self.path), [(date(2026, 10, 14), {4})])
+
+    def test_a_morning_start_that_ends_the_same_day(self):
+        self.write([None, 360, None, None, None, None, None], 12)  # Mon 6 AM -> Mon 6 PM
+        self.assertEqual(cf.read_protocols(self.path), [(date(2026, 10, 14), {0})])
