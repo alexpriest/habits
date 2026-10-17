@@ -21,6 +21,13 @@ The 3-dry-nights bar and the 2-per-weeknight figure are protocol (Asa's plan)
 and live here, so changing them is an edit to this file rather than an app build.
 `weeknights_over` is reported for information; it is not the row's verdict.
 
+NOT LOGGED: Circa's "Not logging today" (ANT-1087) writes `unlogged-days.jsonl`
+beside the drinks log, one mark per day naming the categories not logged:
+    {"categories":["alcohol","food"],"day":"2026-10-16","id":"…","made_at":"…","source":"app"}
+Last line per id wins; `{"day":null,"id":…,"withdrawn":true}` is terminal. An evening
+marked for alcohol is unknown, never dry, and its drinks leave every figure. A
+missing or unreadable marks file means no marks; it never blocks the drinks row.
+
 DEGRADED RULE: an iCloud placeholder (`.drinks.jsonl.icloud`) or an unreadable
 file means the data exists but cannot be read. Change nothing, exit non-zero, and
 let the prior state age. A missing file is ABSENT (app not shipped): state is
@@ -39,6 +46,7 @@ DRINKS = (
     HOME / "Library" / "Mobile Documents" / "iCloud~com~alexpriest~window"
     / "Documents" / "drinks.jsonl"
 )
+UNLOGGED = DRINKS.with_name("unlogged-days.jsonl")
 # A copy of the raw log so Asa can read it and history survives an iCloud reset.
 RAW_COPY = HOME / "Obsidian" / "alexpriest" / "Claude" / "Coach" / "Data" / "drinks.jsonl"
 STATE = HOME / "Code" / "tools" / "habits" / "state" / "drinks.json"
@@ -78,6 +86,44 @@ def read_drinks(path: Path = DRINKS) -> tuple[list[dict], str]:
     return out, OK
 
 
+def read_unlogged(path: Path = UNLOGGED) -> list[dict]:
+    """The "Not logging" marks, best effort: no file or no read is no marks."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return []
+    out: list[dict] = []
+    for line in text.splitlines():
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(rec, dict) and "id" in rec:
+            out.append(rec)
+    return out
+
+
+def alcohol_unlogged(marks: list[dict]) -> set[date]:
+    """Evenings standing as not logged for alcohol: last line per id, a withdrawal terminal."""
+    latest: dict[str, dict] = {}
+    withdrawn: set[str] = set()
+    for rec in marks:
+        sid = str(rec["id"])
+        if rec.get("withdrawn"):
+            withdrawn.add(sid)
+        else:
+            latest[sid] = rec
+    evenings: set[date] = set()
+    for sid, rec in latest.items():
+        if sid in withdrawn or "alcohol" not in (rec.get("categories") or []):
+            continue
+        try:
+            evenings.add(date.fromisoformat(str(rec.get("day"))))
+        except ValueError:
+            continue
+    return evenings
+
+
 def resolve(records: list[dict]) -> list[dict]:
     """Last record per id wins; a deletion is terminal for its id."""
     latest: dict[str, dict] = {}
@@ -113,16 +159,23 @@ def window(today: date) -> list[date]:
     return [today - timedelta(days=i) for i in range(WINDOW_DAYS - 1, -1, -1)]
 
 
-def collect(today: date | None = None, records: list[dict] | None = None, observed: bool = True) -> dict:
-    """Records -> the metric. `observed` False (no file yet) leaves every cell unknown."""
+def collect(
+    today: date | None = None,
+    records: list[dict] | None = None,
+    observed: bool = True,
+    unlogged: list[dict] | None = None,
+) -> dict:
+    """Records -> the metric. `observed` False (no file yet) leaves every cell unknown;
+    an evening in `unlogged` for alcohol is unknown and its drinks are not counted."""
     today = today or date.today()
-    counts = evening_counts(resolve(records or []))
+    not_logged = alcohol_unlogged(unlogged or [])
+    counts = {d: n for d, n in evening_counts(resolve(records or [])).items() if d not in not_logged}
     win = window(today)
 
     # None = before tracking, today's still-open evening, or nothing observed.
     cell_counts: list[int | None] = []
     for d in win:
-        known = observed and TRACKING_SINCE <= d < today
+        known = observed and TRACKING_SINCE <= d < today and d not in not_logged
         cell_counts.append(counts.get(d, 0) if known else None)
 
     # `days` are bools (dry = hit) because the renderer scores cells that way;
@@ -177,7 +230,8 @@ def run(
         except OSError:
             pass  # a backup; losing it is not a failure
 
-    blob = collect(today=today, records=records, observed=status == OK)
+    unlogged = read_unlogged(drinks_path.with_name(UNLOGGED.name))
+    blob = collect(today=today, records=records, observed=status == OK, unlogged=unlogged)
     write_state(blob, state_path)
 
     if not quiet:

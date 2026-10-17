@@ -164,5 +164,78 @@ class Degraded(unittest.TestCase):
             self.assertEqual((tmp / "out" / "copy.jsonl").read_bytes(), src.read_bytes())
 
 
+UNLOGGED_GOLDEN = (
+    '{"categories":["alcohol","food"],"day":"2026-10-16","id":"6F9619FF-8B86-D011-B42D-00C04FC964FF",'
+    '"made_at":"2026-10-16T22:40:00-05:00","source":"app"}'
+)
+
+
+def mark(day: str, sid: str, categories: list[str]) -> dict:
+    return {"categories": categories, "day": day, "id": sid,
+            "made_at": "2026-10-16T22:40:00-05:00", "source": "app"}
+
+
+def withdrawal(sid: str) -> dict:
+    return {"day": None, "id": sid, "withdrawn": True, "withdrawn_at": "2026-10-17T08:00:00-05:00"}
+
+
+class NotLogged(unittest.TestCase):
+    """Circa's "Not logging today" (ANT-1087): an evening marked not logged for alcohol is
+    unknown, never dry, and its drinks leave every figure."""
+
+    def test_golden_line_reads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "unlogged-days.jsonl"
+            path.write_text(UNLOGGED_GOLDEN + "\n" + '{"categories":["al')  # half-written tail
+            self.assertEqual(cd.alcohol_unlogged(cd.read_unlogged(path)), {date(2026, 10, 16)})
+
+    def test_missing_file_is_no_marks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(cd.read_unlogged(Path(tmp) / "unlogged-days.jsonl"), [])
+
+    def test_only_alcohol_marks_count_and_withdrawal_is_terminal(self):
+        marks = [
+            mark("2026-10-07", "a", ["alcohol"]),
+            mark("2026-10-08", "b", ["food"]),           # food only: still judged
+            mark("2026-10-09", "c", ["alcohol"]),
+            withdrawal("c"),
+            mark("2026-10-09", "c", ["alcohol"]),        # must not resurrect
+            mark("2026-10-10", "d", ["alcohol"]),
+            mark("2026-10-10", "d", ["hydration"]),      # rewritten without alcohol
+        ]
+        self.assertEqual(cd.alcohol_unlogged(marks), {date(2026, 10, 7)})
+
+    def test_marked_evening_is_unknown_and_its_drinks_leave_the_totals(self):
+        # Window Tue Oct 6 .. Mon Oct 12; Tue had 3 drinks but is marked not logged for alcohol,
+        # Wed had none and is marked too.
+        recs = [
+            drink("2026-10-06T21:00:00-05:00", "t1"),
+            drink("2026-10-06T21:30:00-05:00", "t2"),
+            drink("2026-10-07T01:30:00-05:00", "t3"),
+            drink("2026-10-10T19:00:00-05:00", "s1"),
+        ]
+        marks = [mark("2026-10-06", "x", ["alcohol"]), mark("2026-10-07", "y", ["alcohol", "food"])]
+        m = cd.collect(date(2026, 10, 12), recs, unlogged=marks)["metrics"]["drinks"]
+        self.assertEqual(m["counts"], [None, None, 0, 0, 1, 0, None])
+        self.assertEqual(m["days"], [None, None, True, True, False, True, None])
+        self.assertEqual(m["value"], 3)
+        self.assertEqual(m["total"], 1)
+        self.assertEqual(m["weeknights_over"], 0)
+
+    def test_run_reads_the_marks_beside_the_drinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            src = tmp / "drinks.jsonl"
+            write(src, [drink("2026-10-06T21:00:00-05:00", "a")])
+            write(tmp / "unlogged-days.jsonl", [mark("2026-10-06", "x", ["alcohol"])])
+            state = tmp / "s.json"
+            rc = cd.run(today=date(2026, 10, 8), drinks_path=src,
+                        raw_copy_path=tmp / "copy.jsonl", state_path=state, quiet=True)
+            self.assertEqual(rc, 0)
+            m = json.loads(state.read_text())["metrics"]["drinks"]
+            self.assertEqual(m["days"][-3:], [None, True, None])
+            self.assertEqual(m["total"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
